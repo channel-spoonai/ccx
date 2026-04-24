@@ -71,7 +71,9 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 	isOR := providers.IsOpenRouter(&tpl)
 
 	fmt.Println()
-	fmt.Printf("  \x1B[36m[%s]\x1B[0m 설정\n\n", tpl.Name)
+	fmt.Printf("  \x1B[36m[%s]\x1B[0m 설정\n", tpl.Name)
+	fmt.Println("  \x1B[90m키 값 대신 env:VAR_NAME을 입력하면 실행 시 환경변수에서 읽습니다.\x1B[0m")
+	fmt.Println()
 
 	// 이름 — 중복이면 " (copy)" 제안
 	suggested := tpl.Name
@@ -123,6 +125,7 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 func addManual(existing []config.Profile) (*config.Profile, error) {
 	fmt.Println()
 	fmt.Println("  \x1B[90m필드를 하나씩 입력합니다. Ctrl+C로 취소.\x1B[0m")
+	fmt.Println("  \x1B[90m키 값 대신 env:VAR_NAME을 입력하면 실행 시 환경변수에서 읽습니다.\x1B[0m")
 
 	existingNames := nameSet(existing)
 	name, err := promptUnique("프로파일 이름", "", existingNames)
@@ -201,6 +204,7 @@ func Edit(loaded *config.Loaded, index int) error {
 	fmt.Println()
 	fmt.Printf("  \x1B[1m\x1B[36m claudex \x1B[0m\x1B[90m— 프로파일 편집: %s\x1B[0m\n", original.Name)
 	fmt.Println("  \x1B[90mEnter로 기존 값 유지, Ctrl+U로 지우고 재입력\x1B[0m")
+	fmt.Println("  \x1B[90m키 값 대신 env:VAR_NAME을 입력하면 실행 시 환경변수에서 읽습니다.\x1B[0m")
 	fmt.Println()
 
 	name, err := promptUnique("프로파일 이름", edited.Name, other)

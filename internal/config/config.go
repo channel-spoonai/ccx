@@ -52,33 +52,32 @@ func ExecDir() string {
 	return filepath.Dir(resolved)
 }
 
-// DefaultPath resolves the config file path by checking, in order:
-//   1. $CLAUDEX_CONFIG
-//   2. $XDG_CONFIG_HOME/claudex/claudex.config.json (or ~/.config/claudex/...)
-//   3. ./claudex.config.json (current working directory)
-//   4. <exec dir>/claudex.config.json
-// The first path that exists wins. If none exist, returns the XDG path so
-// save operations have a canonical target.
+// DefaultPath returns the canonical config location. Fallback to CWD/exec dir
+// was intentionally removed so secrets don't land in a project repo by accident.
+// $CLAUDEX_CONFIG still overrides for power users / tests.
 func DefaultPath() string {
 	if v := os.Getenv(EnvOverride); v != "" {
 		return v
 	}
-	candidates := configCandidates()
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return candidates[0]
+	return canonicalPath()
 }
 
-func configCandidates() []string {
-	var out []string
+func canonicalPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		out = append(out, filepath.Join(xdg, "claudex", Filename))
-	} else if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, ".config", "claudex", Filename))
+		return filepath.Join(xdg, "claudex", Filename)
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// 최후 수단 — 사실상 도달하지 않음
+		return filepath.Join(".", Filename)
+	}
+	return filepath.Join(home, ".config", "claudex", Filename)
+}
+
+// legacyPaths lists the pre-1단계 fallback locations. Checked once on Load to
+// migrate any existing file into the canonical path.
+func legacyPaths() []string {
+	var out []string
 	if cwd, err := os.Getwd(); err == nil {
 		out = append(out, filepath.Join(cwd, Filename))
 	}
@@ -115,7 +114,11 @@ func ExamplePath() string {
 func Load() (*Loaded, error) {
 	path := DefaultPath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return &Loaded{Path: path, Missing: true}, nil
+		if from, ok := tryMigrateLegacy(path); ok {
+			fmt.Fprintf(os.Stderr, "[claudex] 설정 파일을 %s → %s 로 이동했습니다.\n", from, path)
+		} else {
+			return &Loaded{Path: path, Missing: true}, nil
+		}
 	}
 
 	raw, err := os.ReadFile(path)
@@ -138,12 +141,56 @@ func Load() (*Loaded, error) {
 }
 
 func Save(path string, cfg Config) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// 기존 디렉토리가 더 느슨한 퍼미션으로 존재할 수 있어 타이트닝 시도.
+	// Windows는 Chmod mode를 대부분 무시하지만 에러는 내지 않음.
+	_ = os.Chmod(dir, 0o700)
+
 	buf, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	buf = append(buf, '\n')
 	return os.WriteFile(path, buf, 0o600)
+}
+
+// tryMigrateLegacy moves a config file from the old CWD/exec-dir locations
+// into the canonical path. Returns (source, true) on success so the caller
+// can inform the user, or (_, false) if nothing was migrated.
+func tryMigrateLegacy(dst string) (string, bool) {
+	for _, src := range legacyPaths() {
+		if src == dst {
+			continue
+		}
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			continue
+		}
+		if err := os.Rename(src, dst); err == nil {
+			_ = os.Chmod(dst, 0o600)
+			return src, true
+		}
+		// 크로스 디바이스 등 rename 실패 — 복사 + 삭제로 폴백
+		if err := copyFile(src, dst); err == nil {
+			_ = os.Chmod(dst, 0o600)
+			_ = os.Remove(src)
+			return src, true
+		}
+	}
+	return "", false
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o600)
 }
 
 func LoadExample() ([]Profile, error) {

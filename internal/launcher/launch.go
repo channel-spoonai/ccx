@@ -14,7 +14,8 @@ const ClaudeCmd = "claude"
 
 func BuildEnv(p *config.Profile) []string {
 	env := os.Environ()
-	set := func(k, v string) {
+	set := func(k, raw string) {
+		v := ResolveSecret(raw)
 		if v == "" {
 			return
 		}
@@ -34,6 +35,48 @@ func BuildEnv(p *config.Profile) []string {
 		set(k, v)
 	}
 	return env
+}
+
+// ResolveSecret expands an "env:VAR_NAME" reference into the actual env value
+// so users can keep real keys out of claudex.config.json. Plain values pass
+// through unchanged. Missing variables resolve to "" (same as empty key) —
+// the caller logs a warning via WarnUnresolvedRefs.
+func ResolveSecret(v string) string {
+	const prefix = "env:"
+	if strings.HasPrefix(v, prefix) {
+		return os.Getenv(strings.TrimPrefix(v, prefix))
+	}
+	return v
+}
+
+// unresolvedEnvRefs returns env-var names referenced by the profile but not
+// set in the current process environment. Used to warn the user before claude
+// exits with 401.
+func unresolvedEnvRefs(p *config.Profile) []string {
+	var missing []string
+	check := func(v string) {
+		const prefix = "env:"
+		if !strings.HasPrefix(v, prefix) {
+			return
+		}
+		name := strings.TrimPrefix(v, prefix)
+		if _, ok := os.LookupEnv(name); !ok {
+			missing = append(missing, name)
+		}
+	}
+	check(p.APIKey)
+	check(p.AuthToken)
+	check(p.BaseURL)
+	check(p.Model)
+	if p.Models != nil {
+		check(p.Models.Opus)
+		check(p.Models.Sonnet)
+		check(p.Models.Haiku)
+	}
+	for _, v := range p.Env {
+		check(v)
+	}
+	return missing
 }
 
 func replaceOrAppend(env []string, key, value string) []string {
@@ -80,6 +123,9 @@ func ErrClaudeNotFound() error { return errClaudeNotFound }
 
 func printBanner(p *config.Profile) {
 	fmt.Printf("\x1B[36m[claudex]\x1B[0m 프로파일: \x1B[1m%s\x1B[0m\n", p.Name)
+	if missing := unresolvedEnvRefs(p); len(missing) > 0 {
+		fmt.Printf("\x1B[33m[claudex]\x1B[0m ⚠ 환경변수 미설정: %s\n", strings.Join(missing, ", "))
+	}
 	if p.BaseURL != "" {
 		fmt.Printf("\x1B[36m[claudex]\x1B[0m API: %s\n", p.BaseURL)
 	}
