@@ -258,7 +258,7 @@ async function promptChoice(question, choices) {
 // items: [{ label, description?, payload, pinned? }]
 // pinned 항목은 검색어와 무관하게 항상 목록 하단에 표시
 // 반환: 선택된 item.payload, 또는 null (Esc 취소)
-async function selectFromCatalog(items, title) {
+async function selectFromCatalog(items, title, { pageSize = 10 } = {}) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     if (!stdin.isTTY) {
@@ -268,6 +268,16 @@ async function selectFromCatalog(items, title) {
 
     let query = '';
     let selected = 0;
+    let scrollOffset = 0;
+
+    function clampScroll(visibleLen) {
+      if (visibleLen === 0) { scrollOffset = 0; return; }
+      if (selected < scrollOffset) scrollOffset = selected;
+      if (selected >= scrollOffset + pageSize) scrollOffset = selected - pageSize + 1;
+      const maxOffset = Math.max(0, visibleLen - pageSize);
+      if (scrollOffset > maxOffset) scrollOffset = maxOffset;
+      if (scrollOffset < 0) scrollOffset = 0;
+    }
 
     // 검색 매칭: 대소문자/공백 무시 substring
     // "lmst"가 "LM Studio"에 매칭되도록 양쪽 모두 소문자화 + 공백 제거
@@ -309,7 +319,19 @@ async function selectFromCatalog(items, title) {
       if (visible.length === 0) {
         console.log('   \x1B[90m(일치하는 항목 없음)\x1B[0m');
       } else {
-        visible.forEach((item, i) => {
+        clampScroll(visible.length);
+        const windowEnd = Math.min(visible.length, scrollOffset + pageSize);
+        const hasAbove = scrollOffset > 0;
+        const hasBelow = windowEnd < visible.length;
+
+        if (hasAbove) {
+          console.log(`   \x1B[90m▲ ${scrollOffset}개 위\x1B[0m`);
+        } else {
+          console.log('');
+        }
+
+        for (let i = scrollOffset; i < windowEnd; i++) {
+          const item = visible[i];
           const cursor = i === selected ? '\x1B[33m❯\x1B[0m' : ' ';
           const color = item.pinned ? '32' : '37';
           const label = i === selected
@@ -317,7 +339,13 @@ async function selectFromCatalog(items, title) {
             : `\x1B[${color}m${item.label}\x1B[0m`;
           const desc = item.description ? `  \x1B[90m${item.description}\x1B[0m` : '';
           console.log(`   ${cursor} ${label}${desc}`);
-        });
+        }
+
+        if (hasBelow) {
+          console.log(`   \x1B[90m▼ ${visible.length - windowEnd}개 아래\x1B[0m`);
+        } else {
+          console.log('');
+        }
       }
 
       console.log('');
@@ -389,6 +417,7 @@ async function selectFromCatalog(items, title) {
       }
       if (changed) {
         selected = 0;
+        scrollOffset = 0;
         render();
       }
     });
