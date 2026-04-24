@@ -21,8 +21,17 @@ func PromptLine(question string, opts PromptOptions) (string, error) {
 	for {
 		var value string
 		var err error
-		if opts.Prefill && IsTTY() {
-			value, err = promptPrefill(question, opts.Default)
+		if IsTTY() {
+			// raw 모드 + byteCh 기반 라인 에디터. cooked 모드를 쓰면
+			// startReader goroutine이 stdin 바이트를 선점해 block된다.
+			def := opts.Default
+			if !opts.Prefill {
+				def = ""
+			}
+			value, err = promptPrefill(question, def)
+			if err == nil && value == "" && !opts.Prefill {
+				value = opts.Default
+			}
 		} else {
 			value, err = promptCooked(question, opts.Default)
 		}

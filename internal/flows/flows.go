@@ -293,12 +293,9 @@ func Delete(loaded *config.Loaded, index int) error {
 
 	next := append(existing[:index:index], existing[index+1:]...)
 	if err := config.Save(loaded.Path, config.Config{Profiles: next}); err != nil {
-		fmt.Printf("\n  \x1B[31m삭제 실패: %s\x1B[0m\n", err)
-	} else {
-		fmt.Printf("\n  \x1B[32m✓\x1B[0m %q 삭제됨\n", target.Name)
+		fmt.Printf("\n  \x1B[31m삭제 실패: %s\x1B[0m\n\n", err)
+		_, _ = menu.PromptLine("Enter를 눌러 계속", menu.PromptOptions{})
 	}
-	fmt.Println()
-	_, _ = menu.PromptLine("Enter를 눌러 계속", menu.PromptOptions{})
 	return nil
 }
 
@@ -402,24 +399,53 @@ func configureLMStudioModels(tpl *config.Profile) {
 	}
 	fmt.Printf("  \x1B[32m✓\x1B[0m %d개 모델 발견\n", len(res.Models))
 
-	var chosen string
-	if len(res.Models) == 1 {
-		chosen = res.Models[0]
-		fmt.Printf("  \x1B[32m✓\x1B[0m 자동 선택: %s\n", chosen)
-	} else {
-		items := make([]menu.CatalogItem, len(res.Models))
-		for i, m := range res.Models {
-			items[i] = menu.CatalogItem{Label: m, Payload: m}
+	baseItems := make([]menu.CatalogItem, 0, len(res.Models)+1)
+	for _, m := range res.Models {
+		baseItems = append(baseItems, menu.CatalogItem{Label: m, Payload: m})
+	}
+	skip := menu.CatalogItem{
+		Label:       "(이 티어는 설정하지 않음)",
+		Description: "환경변수 미지정 — Claude Code 기본 동작",
+		Payload:     "",
+		Pinned:      true,
+	}
+
+	cur := config.Models{}
+	if tpl.Models != nil {
+		cur = *tpl.Models
+	}
+	next := config.Models{}
+	for _, tier := range []struct {
+		name string
+		curr string
+		set  func(string)
+	}{
+		{"opus", cur.Opus, func(s string) { next.Opus = s }},
+		{"sonnet", cur.Sonnet, func(s string) { next.Sonnet = s }},
+		{"haiku", cur.Haiku, func(s string) { next.Haiku = s }},
+	} {
+		title := tier.name + " 티어 모델 선택"
+		if tier.curr != "" {
+			title += " — 현재: " + tier.curr
 		}
-		picked, _ := menu.SelectFromCatalog(items, "LM Studio 모델 선택 (모든 티어에 적용)", 10)
+		items := append([]menu.CatalogItem{}, baseItems...)
+		items = append(items, skip)
+		picked, _ := menu.SelectFromCatalog(items, title, 10)
+		if picked == nil {
+			if tier.curr != "" {
+				tier.set(tier.curr)
+			}
+			continue
+		}
 		if s, ok := picked.(string); ok && s != "" {
-			chosen = s
-		} else {
-			chosen = res.Models[0]
-			fmt.Printf("  \x1B[90m취소됨 — 기본값 사용: %s\x1B[0m\n", chosen)
+			tier.set(s)
 		}
 	}
-	tpl.Models = &config.Models{Opus: chosen, Sonnet: chosen, Haiku: chosen}
+	if next.Opus == "" && next.Sonnet == "" && next.Haiku == "" {
+		tpl.Models = nil
+	} else {
+		tpl.Models = &next
+	}
 }
 
 func configureOpenRouterModels(tpl *config.Profile) {
