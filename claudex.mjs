@@ -13,6 +13,21 @@ const CONFIG_FILENAME = 'claudex.config.json';
 const EXAMPLE_CONFIG = 'claudex.config.example.json';
 const CLAUDE_CMD = 'claude';
 
+// ── Alternate Screen Buffer ─────────────────────────────────────
+// 인터랙티브 메뉴를 대체 버퍼에서 그려서 사용자의 터미널 스크롤백을 오염시키지 않는다.
+// claude 실행 직전에는 반드시 exitAltScreen()으로 복귀해야 claude 세션이 정상 터미널에 남는다.
+let __altScreenActive = false;
+function enterAltScreen() {
+  if (__altScreenActive || !process.stdout.isTTY) return;
+  process.stdout.write('\x1B[?1049h\x1B[H');
+  __altScreenActive = true;
+}
+function exitAltScreen() {
+  if (!__altScreenActive) return;
+  process.stdout.write('\x1B[?1049l');
+  __altScreenActive = false;
+}
+
 // ── Config Loading ──────────────────────────────────────────────
 
 function loadConfig() {
@@ -164,7 +179,7 @@ async function selectProfile(profiles) {
       if (key === '\x1B' || key === '\x03') {
         stdin.setRawMode(false);
         stdin.pause();
-        process.stdout.write('\x1B[2J\x1B[H');
+        exitAltScreen();
         console.log('취소되었습니다.');
         process.exit(0);
       }
@@ -365,7 +380,7 @@ async function selectFromCatalog(items, title, { pageSize = 10 } = {}) {
       // 단일 chunk로 오는 메타키 먼저 정확 매칭
       if (chunk === '\x03') {
         cleanup();
-        process.stdout.write('\x1B[2J\x1B[H');
+        exitAltScreen();
         console.log('취소되었습니다.');
         process.exit(0);
       }
@@ -508,12 +523,15 @@ async function customizeTemplate(template, existing) {
     tpl.baseUrl = await promptLine('baseUrl (엔드포인트)', { default: tpl.baseUrl, prefill: true });
   }
 
-  // 인증 — prefill
+  // 인증 — 동일 baseUrl 호스트의 기존 프로파일에 저장된 키를 우선 prefill
+  const prior = findPriorAuth(tpl.baseUrl, existing);
   if (tpl.authToken !== undefined) {
-    tpl.authToken = await promptLine('authToken (Bearer 토큰)', { default: tpl.authToken, prefill: true });
+    const def = prior.authToken || tpl.authToken;
+    tpl.authToken = await promptLine('authToken (Bearer 토큰)', { default: def, prefill: true });
   }
   if (tpl.apiKey !== undefined) {
-    tpl.apiKey = await promptLine('apiKey', { default: tpl.apiKey, prefill: true });
+    const def = prior.apiKey || tpl.apiKey;
+    tpl.apiKey = await promptLine('apiKey', { default: def, prefill: true });
   }
 
   // LM Studio: 실제 로드된 모델 목록 조회해서 등록
@@ -528,6 +546,22 @@ async function customizeTemplate(template, existing) {
 
 function isOpenRouterProfile(p) {
   return /openrouter/i.test(p?.name || '') || /openrouter\.ai/i.test(p?.baseUrl || '');
+}
+
+// 같은 baseUrl 호스트를 쓰는 기존 프로파일의 인증 값을 찾아 프로바이더 추가 시 prefill.
+// 호스트 매칭이라 사용자가 프로파일 이름을 바꿔도 잡힌다.
+function extractHost(url) {
+  try { return new URL(url).host.toLowerCase(); } catch { return ''; }
+}
+function findPriorAuth(baseUrl, existing) {
+  const host = extractHost(baseUrl);
+  if (!host) return {};
+  for (const p of existing) {
+    if (extractHost(p.baseUrl) === host) {
+      return { authToken: p.authToken, apiKey: p.apiKey };
+    }
+  }
+  return {};
 }
 
 async function fetchOpenAIModels(baseUrl, token) {
@@ -706,7 +740,11 @@ async function addManual(existing) {
     'apiKey — x-api-key 헤더 (DeepSeek, MiniMax, OpenRouter 등)',
   ]);
   const authField = authType === 0 ? 'authToken' : 'apiKey';
-  const authValue = await promptLine(`${authField} 값`);
+  const prior = findPriorAuth(baseUrl, existing);
+  const priorValue = authField === 'authToken' ? prior.authToken : prior.apiKey;
+  const authValue = priorValue
+    ? await promptLine(`${authField} 값`, { default: priorValue, prefill: true })
+    : await promptLine(`${authField} 값`);
 
   const opus = await promptLine('모델 opus (선택)', { required: false });
   const sonnet = await promptLine('모델 sonnet (선택)', { required: false, default: opus });
@@ -898,6 +936,9 @@ function launchClaude(profile, claudeArgs) {
   }
   console.log('');
 
+  // 대체 버퍼에서 실제 터미널로 복귀 후 claude 실행 (claude 세션은 정상 스크롤백에 남아야 함)
+  exitAltScreen();
+
   const child = spawn(CLAUDE_CMD, claudeArgs, {
     env,
     stdio: 'inherit',
@@ -949,6 +990,10 @@ async function main() {
 
   // 인터랙티브 메뉴 — 사용자가 프로파일을 고를 때까지 루프
   // config가 없으면 addProfileFlow가 파일을 생성한다
+  enterAltScreen();
+  process.on('exit', exitAltScreen);
+  process.on('SIGINT', () => { exitAltScreen(); process.exit(130); });
+  process.on('SIGTERM', () => { exitAltScreen(); process.exit(143); });
   while (true) {
     const action = await selectProfile(config.profiles || []);
     if (action.kind === 'launch') {
