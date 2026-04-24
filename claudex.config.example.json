@@ -1,0 +1,29 @@
+{
+  "profiles": [
+    {
+      "name": "GLM Coding Plan",
+      "description": "z.ai GLM coding models (glm-5.1)",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "authToken": "YOUR_ZAI_API_KEY",
+      "models": {
+        "opus": "glm-5.1",
+        "sonnet": "glm-5.1",
+        "haiku": "glm-4.5-air"
+      },
+      "env": {
+        "API_TIMEOUT_MS": "3000000"
+      }
+    },
+    {
+      "name": "OpenRouter",
+      "description": "OpenRouter multi-model gateway",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "sk-or-YOUR_KEY_HERE",
+      "models": {
+        "opus": "anthropic/claude-opus-4-20250514",
+        "sonnet": "anthropic/claude-sonnet-4-20250514",
+        "haiku": "anthropic/claude-haiku-3-5-20241022"
+      }
+    }
+  ]
+}
