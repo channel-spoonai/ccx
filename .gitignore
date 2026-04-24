@@ -1,0 +1,46 @@
+# ── Secrets ─────────────────────────────────────────────────────
+# API 키가 들어 있는 실설정 — 반드시 제외
+claudex.config.json
+apikey.md
+memo.md
+.env
+.env.*
+
+# ── Build artifacts ─────────────────────────────────────────────
+dist/
+*.exe
+
+# ── Go ──────────────────────────────────────────────────────────
+# 테스트 바이너리
+*.test
+*.out
+# 커버리지
+coverage.out
+coverage.html
+# vendor는 현재 사용하지 않음
+/vendor/
+
+# ── Node (레거시 claudex.mjs 유지 기간 동안) ─────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# ── OS ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editors / IDE ───────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# ── Misc ────────────────────────────────────────────────────────
+*.log
+.tmp/
+tmp/
