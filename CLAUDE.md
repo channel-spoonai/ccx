@@ -62,7 +62,7 @@ claudex는 Claude Code를 재사용하기 때문에 **Anthropic 호환 엔드포
 | Kimi (Moonshot) | `https://api.moonshot.ai/anthropic` | `authToken` | platform.kimi.ai/docs/guide/agent-support |
 | DeepSeek | `https://api.deepseek.com/anthropic` | `apiKey` | api-docs.deepseek.com/guides/anthropic_api |
 | MiniMax | `https://api.minimax.io/anthropic` | `apiKey` | platform.minimax.io/docs/api-reference/text-anthropic-api |
-| OpenRouter | `https://openrouter.ai/api/v1` | `apiKey` | openrouter.ai/docs |
+| OpenRouter | `https://openrouter.ai/api` | `apiKey` | openrouter.ai/docs — Claude Code가 `/v1/messages`를 자동 append하므로 `/v1` 없이 지정. 모델 ID는 `provider/model[:tag]` 형식 (예: `google/gemma-2-9b-it:free`) |
 | LM Studio (로컬) | `http://localhost:1234` | `authToken: "lmstudio"` (더미, 선택) | lmstudio.ai/docs/developer/anthropic-compat, v0.4.1+ 필요 |
 
 **로컬 프로바이더 주의사항**: 모델 ID는 LM Studio에서 로드한 실제 식별자여야 한다(예: `ibm/granite-4-micro`). Claude Code가 기대하는 툴 사용/캐시 제어 동작을 로컬 모델이 완전히 지원하지 않을 수 있다.
