@@ -2,12 +2,7 @@
   "name": "claudex",
   "version": "1.0.0",
   "description": "CLI wrapper for running Claude Code with different LLM provider profiles",
-  "type": "module",
-  "bin": {
-    "claudex": "./claudex.mjs"
-  },
   "scripts": {
-    "start": "node claudex.mjs"
   },
   "license": "MIT"
 }
