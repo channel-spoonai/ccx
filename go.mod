@@ -1,4 +1,4 @@
-module github.com/yobuce/claudex
+module github.com/channel-spoonai/ccx
 
 go 1.26.2
 

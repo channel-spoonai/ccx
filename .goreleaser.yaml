@@ -1,15 +1,15 @@
 version: 2
 
-project_name: claudex
+project_name: ccx
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: claudex
-    main: ./cmd/claudex
-    binary: claudex
+  - id: ccx
+    main: ./cmd/ccx
+    binary: ccx
     env:
       - CGO_ENABLED=0
     flags:
@@ -29,7 +29,7 @@ builds:
 
 archives:
   - id: default
-    name_template: "claudex-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    name_template: "ccx-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -37,7 +37,7 @@ archives:
     files:
       - README.md
       - CLAUDE.md
-      - claudex.config.example.json
+      - ccx.config.example.json
       - install.sh
 
 checksum:
@@ -65,12 +65,12 @@ release:
 
     **macOS / Linux**
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/yobuce/claudex/main/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.sh | bash
     ```
 
     **Windows (PowerShell)**
     ```powershell
-    irm https://raw.githubusercontent.com/yobuce/claudex/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.ps1 | iex
     ```
 
     수동 설치는 아래 Assets에서 OS/아키텍처에 맞는 아카이브를 받으세요.

@@ -5,9 +5,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/yobuce/claudex/internal/config"
-	"github.com/yobuce/claudex/internal/menu"
-	"github.com/yobuce/claudex/internal/providers"
+	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/menu"
+	"github.com/channel-spoonai/ccx/internal/providers"
 )
 
 // Add runs the new-provider flow: pick a template from the catalog (or
@@ -202,7 +202,7 @@ func Edit(loaded *config.Loaded, index int) error {
 
 	menu.ClearScreen()
 	fmt.Println()
-	fmt.Printf("  \x1B[1m\x1B[36m claudex \x1B[0m\x1B[90m— 프로파일 편집: %s\x1B[0m\n", original.Name)
+	fmt.Printf("  \x1B[1m\x1B[36m ccx \x1B[0m\x1B[90m— 프로파일 편집: %s\x1B[0m\n", original.Name)
 	fmt.Println("  \x1B[90mEnter로 기존 값 유지, Ctrl+U로 지우고 재입력\x1B[0m")
 	fmt.Println("  \x1B[90m키 값 대신 env:VAR_NAME을 입력하면 실행 시 환경변수에서 읽습니다.\x1B[0m")
 	fmt.Println()
@@ -271,7 +271,7 @@ func Delete(loaded *config.Loaded, index int) error {
 
 	menu.ClearScreen()
 	fmt.Println()
-	fmt.Printf("  \x1B[1m\x1B[31m claudex \x1B[0m\x1B[90m— 프로파일 삭제\x1B[0m\n\n")
+	fmt.Printf("  \x1B[1m\x1B[31m ccx \x1B[0m\x1B[90m— 프로파일 삭제\x1B[0m\n\n")
 	fmt.Printf("  이름:    \x1B[1m%s\x1B[0m\n", target.Name)
 	if target.BaseURL != "" {
 		fmt.Printf("  baseUrl: \x1B[90m%s\x1B[0m\n", target.BaseURL)
@@ -384,7 +384,7 @@ func promptModelsManual(current *config.Models) *config.Models {
 
 func configureLMStudioModels(tpl *config.Profile) {
 	fmt.Println()
-	fmt.Printf("  \x1B[36m[claudex]\x1B[0m 모델 목록 조회 중... \x1B[90m(%s/v1/models)\x1B[0m\n", tpl.BaseURL)
+	fmt.Printf("  \x1B[36m[ccx]\x1B[0m 모델 목록 조회 중... \x1B[90m(%s/v1/models)\x1B[0m\n", tpl.BaseURL)
 	res := providers.FetchLMStudioModels(tpl.BaseURL, tpl.AuthToken)
 	if res.Err != nil {
 		fmt.Printf("  \x1B[33m⚠ 조회 실패: %s\x1B[0m\n", res.Err)
@@ -450,7 +450,7 @@ func configureLMStudioModels(tpl *config.Profile) {
 
 func configureOpenRouterModels(tpl *config.Profile) {
 	fmt.Println()
-	fmt.Print("  \x1B[36m[claudex]\x1B[0m OpenRouter 모델 목록 조회 중... \x1B[90m(https://openrouter.ai/api/v1/models)\x1B[0m\n")
+	fmt.Print("  \x1B[36m[ccx]\x1B[0m OpenRouter 모델 목록 조회 중... \x1B[90m(https://openrouter.ai/api/v1/models)\x1B[0m\n")
 	token := tpl.APIKey
 	if token == "" {
 		token = tpl.AuthToken

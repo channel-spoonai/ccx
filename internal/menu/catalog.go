@@ -96,7 +96,7 @@ func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, er
 
 		ClearScreen()
 		fmt.Print("\r\n")
-		fmt.Printf("  \x1B[1m\x1B[36m claudex \x1B[0m\x1B[90m— %s\x1B[0m\r\n\r\n", title)
+		fmt.Printf("  \x1B[1m\x1B[36m ccx \x1B[0m\x1B[90m— %s\x1B[0m\r\n\r\n", title)
 
 		counter := ""
 		if len(query) > 0 {

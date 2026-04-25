@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yobuce/claudex/internal/config"
+	"github.com/channel-spoonai/ccx/internal/config"
 )
 
 type ActionKind int
@@ -59,7 +59,7 @@ func SelectProfile(profiles []config.Profile) (Action, error) {
 	render := func() {
 		ClearScreen()
 		fmt.Print("\r\n")
-		fmt.Print("  \x1B[1m\x1B[36m claudex \x1B[0m\x1B[90m— 프로파일을 선택하세요\x1B[0m\r\n\r\n")
+		fmt.Print("  \x1B[1m\x1B[36m ccx \x1B[0m\x1B[90m— 프로파일을 선택하세요\x1B[0m\r\n\r\n")
 		if len(profiles) == 0 {
 			fmt.Print("   \x1B[90m(등록된 프로파일이 없습니다)\x1B[0m\r\n\r\n")
 		}

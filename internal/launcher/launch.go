@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/yobuce/claudex/internal/config"
+	"github.com/channel-spoonai/ccx/internal/config"
 )
 
 const ClaudeCmd = "claude"
@@ -38,7 +38,7 @@ func BuildEnv(p *config.Profile) []string {
 }
 
 // ResolveSecret expands an "env:VAR_NAME" reference into the actual env value
-// so users can keep real keys out of claudex.config.json. Plain values pass
+// so users can keep real keys out of ccx.config.json. Plain values pass
 // through unchanged. Missing variables resolve to "" (same as empty key) —
 // the caller logs a warning via WarnUnresolvedRefs.
 func ResolveSecret(v string) string {
@@ -122,12 +122,12 @@ var errClaudeNotFound = errors.New(`"claude"를 찾을 수 없습니다. Claude 
 func ErrClaudeNotFound() error { return errClaudeNotFound }
 
 func printBanner(p *config.Profile) {
-	fmt.Printf("\x1B[36m[claudex]\x1B[0m 프로파일: \x1B[1m%s\x1B[0m\n", p.Name)
+	fmt.Printf("\x1B[36m[ccx]\x1B[0m 프로파일: \x1B[1m%s\x1B[0m\n", p.Name)
 	if missing := unresolvedEnvRefs(p); len(missing) > 0 {
-		fmt.Printf("\x1B[33m[claudex]\x1B[0m ⚠ 환경변수 미설정: %s\n", strings.Join(missing, ", "))
+		fmt.Printf("\x1B[33m[ccx]\x1B[0m ⚠ 환경변수 미설정: %s\n", strings.Join(missing, ", "))
 	}
 	if p.BaseURL != "" {
-		fmt.Printf("\x1B[36m[claudex]\x1B[0m API: %s\n", p.BaseURL)
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m API: %s\n", p.BaseURL)
 	}
 	if p.Models != nil {
 		var parts []string
@@ -141,7 +141,7 @@ func printBanner(p *config.Profile) {
 			parts = append(parts, "haiku→"+p.Models.Haiku)
 		}
 		if len(parts) > 0 {
-			fmt.Printf("\x1B[36m[claudex]\x1B[0m 모델: %s\n", strings.Join(parts, ", "))
+			fmt.Printf("\x1B[36m[ccx]\x1B[0m 모델: %s\n", strings.Join(parts, ", "))
 		}
 	}
 	fmt.Println()

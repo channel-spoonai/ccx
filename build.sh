@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cross-compile claudex for macOS/Linux/Windows.
-# Output: dist/claudex-<os>-<arch>[.exe]
+# Cross-compile ccx for macOS/Linux/Windows.
+# Output: dist/ccx-<os>-<arch>[.exe]
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -19,14 +19,14 @@ for target in "${TARGETS[@]}"; do
   arch="${target#*/}"
   ext=""
   [[ "$os" == "windows" ]] && ext=".exe"
-  out="dist/claudex-${os}-${arch}${ext}"
+  out="dist/ccx-${os}-${arch}${ext}"
 
   echo "→ $out"
   GOOS="$os" GOARCH="$arch" \
     go build -ldflags="-s -w" -trimpath \
-    -o "$out" ./cmd/claudex
+    -o "$out" ./cmd/ccx
 done
 
 echo
 echo "Done. Binaries in dist/:"
-ls -lh dist/claudex-*
+ls -lh dist/ccx-*

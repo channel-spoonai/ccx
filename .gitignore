@@ -5,6 +5,7 @@ apikey.md
 memo.md
 .env
 .env.*
+.CLAUDE.md
 
 # ── Build artifacts ─────────────────────────────────────────────
 dist/

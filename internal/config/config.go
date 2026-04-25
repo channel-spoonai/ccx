@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	Filename        = "claudex.config.json"
-	ExampleFilename = "claudex.config.example.json"
-	EnvOverride     = "CLAUDEX_CONFIG"
+	Filename        = "ccx.config.json"
+	ExampleFilename = "ccx.config.example.json"
+	EnvOverride     = "CCX_CONFIG"
 )
 
 type Models struct {
@@ -54,7 +54,7 @@ func ExecDir() string {
 
 // DefaultPath returns the canonical config location. Fallback to CWD/exec dir
 // was intentionally removed so secrets don't land in a project repo by accident.
-// $CLAUDEX_CONFIG still overrides for power users / tests.
+// $CCX_CONFIG still overrides for power users / tests.
 func DefaultPath() string {
 	if v := os.Getenv(EnvOverride); v != "" {
 		return v
@@ -64,14 +64,14 @@ func DefaultPath() string {
 
 func canonicalPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "claudex", Filename)
+		return filepath.Join(xdg, "ccx", Filename)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// 최후 수단 — 사실상 도달하지 않음
 		return filepath.Join(".", Filename)
 	}
-	return filepath.Join(home, ".config", "claudex", Filename)
+	return filepath.Join(home, ".config", "ccx", Filename)
 }
 
 // legacyPaths lists the pre-1단계 fallback locations. Checked once on Load to
@@ -80,15 +80,24 @@ func legacyPaths() []string {
 	var out []string
 	if cwd, err := os.Getwd(); err == nil {
 		out = append(out, filepath.Join(cwd, Filename))
+		out = append(out, filepath.Join(cwd, "claudex.config.json"))
 	}
 	if dir := ExecDir(); dir != "" {
 		out = append(out, filepath.Join(dir, Filename))
+		out = append(out, filepath.Join(dir, "claudex.config.json"))
+	}
+	// 이전 이름(claudex)으로 저장된 사용자 config 자동 이전
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		out = append(out, filepath.Join(xdg, "claudex", "claudex.config.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		out = append(out, filepath.Join(home, ".config", "claudex", "claudex.config.json"))
 	}
 	return out
 }
 
 // ExamplePath tries to locate the example catalog. Checked locations mirror
-// DefaultPath but also include ../share/claudex for system installs.
+// DefaultPath but also include ../share/ccx for system installs.
 func ExamplePath() string {
 	var candidates []string
 	if cwd, err := os.Getwd(); err == nil {
@@ -97,7 +106,7 @@ func ExamplePath() string {
 	if dir := ExecDir(); dir != "" {
 		candidates = append(candidates,
 			filepath.Join(dir, ExampleFilename),
-			filepath.Join(dir, "..", "share", "claudex", ExampleFilename),
+			filepath.Join(dir, "..", "share", "ccx", ExampleFilename),
 		)
 	}
 	for _, c := range candidates {
@@ -115,7 +124,7 @@ func Load() (*Loaded, error) {
 	path := DefaultPath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if from, ok := tryMigrateLegacy(path); ok {
-			fmt.Fprintf(os.Stderr, "[claudex] 설정 파일을 %s → %s 로 이동했습니다.\n", from, path)
+			fmt.Fprintf(os.Stderr, "[ccx] 설정 파일을 %s → %s 로 이동했습니다.\n", from, path)
 		} else {
 			return &Loaded{Path: path, Missing: true}, nil
 		}

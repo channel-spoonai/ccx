@@ -5,20 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yobuce/claudex/internal/config"
+	"github.com/channel-spoonai/ccx/internal/config"
 )
 
 func TestResolveSecret(t *testing.T) {
-	os.Setenv("CLAUDEX_TEST_KEY", "secret-value")
-	defer os.Unsetenv("CLAUDEX_TEST_KEY")
-	os.Unsetenv("CLAUDEX_TEST_MISSING")
+	os.Setenv("CCX_TEST_KEY", "secret-value")
+	defer os.Unsetenv("CCX_TEST_KEY")
+	os.Unsetenv("CCX_TEST_MISSING")
 
 	cases := []struct {
 		in, want string
 	}{
 		{"plain-value", "plain-value"},
-		{"env:CLAUDEX_TEST_KEY", "secret-value"},
-		{"env:CLAUDEX_TEST_MISSING", ""},
+		{"env:CCX_TEST_KEY", "secret-value"},
+		{"env:CCX_TEST_MISSING", ""},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -29,13 +29,13 @@ func TestResolveSecret(t *testing.T) {
 }
 
 func TestBuildEnvResolvesReferences(t *testing.T) {
-	os.Setenv("CLAUDEX_TEST_KEY", "resolved-key")
-	defer os.Unsetenv("CLAUDEX_TEST_KEY")
+	os.Setenv("CCX_TEST_KEY", "resolved-key")
+	defer os.Unsetenv("CCX_TEST_KEY")
 
 	p := &config.Profile{
 		Name:      "t",
 		BaseURL:   "https://example.com",
-		APIKey:    "env:CLAUDEX_TEST_KEY",
+		APIKey:    "env:CCX_TEST_KEY",
 		AuthToken: "plain-token",
 	}
 	env := BuildEnv(p)
@@ -57,17 +57,17 @@ func TestBuildEnvResolvesReferences(t *testing.T) {
 }
 
 func TestUnresolvedEnvRefs(t *testing.T) {
-	os.Setenv("CLAUDEX_TEST_PRESENT", "x")
-	defer os.Unsetenv("CLAUDEX_TEST_PRESENT")
-	os.Unsetenv("CLAUDEX_TEST_ABSENT")
+	os.Setenv("CCX_TEST_PRESENT", "x")
+	defer os.Unsetenv("CCX_TEST_PRESENT")
+	os.Unsetenv("CCX_TEST_ABSENT")
 
 	p := &config.Profile{
-		APIKey:    "env:CLAUDEX_TEST_PRESENT",
-		AuthToken: "env:CLAUDEX_TEST_ABSENT",
+		APIKey:    "env:CCX_TEST_PRESENT",
+		AuthToken: "env:CCX_TEST_ABSENT",
 	}
 	missing := unresolvedEnvRefs(p)
-	if len(missing) != 1 || missing[0] != "CLAUDEX_TEST_ABSENT" {
-		t.Errorf("want [CLAUDEX_TEST_ABSENT], got %v", missing)
+	if len(missing) != 1 || missing[0] != "CCX_TEST_ABSENT" {
+		t.Errorf("want [CCX_TEST_ABSENT], got %v", missing)
 	}
 }
 

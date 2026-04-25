@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yobuce/claudex/internal/config"
-	"github.com/yobuce/claudex/internal/flows"
-	"github.com/yobuce/claudex/internal/launcher"
-	"github.com/yobuce/claudex/internal/menu"
+	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/flows"
+	"github.com/channel-spoonai/ccx/internal/launcher"
+	"github.com/channel-spoonai/ccx/internal/menu"
 )
 
 type parsedArgs struct {
@@ -23,7 +23,7 @@ func parseArgs(argv []string) parsedArgs {
 		if argv[i] == "-xSet" {
 			if i+1 >= len(argv) {
 				fmt.Fprintln(os.Stderr, "Error: -xSet 뒤에 프로파일 이름이 필요합니다.")
-				fmt.Fprintln(os.Stderr, `사용법: claudex -xSet "프로파일 이름" [claude 옵션...]`)
+				fmt.Fprintln(os.Stderr, `사용법: ccx -xSet "프로파일 이름" [claude 옵션...]`)
 				os.Exit(1)
 			}
 			out.profileName = argv[i+1]
