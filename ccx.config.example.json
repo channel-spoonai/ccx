@@ -1,0 +1,73 @@
+{
+  "profiles": [
+    {
+      "name": "GLM Coding Plan",
+      "description": "z.ai GLM (Anthropic-compatible)",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "authToken": "YOUR_ZAI_API_KEY",
+      "models": {
+        "opus": "GLM-4.7",
+        "sonnet": "GLM-4.7",
+        "haiku": "GLM-4.5-Air"
+      },
+      "env": {
+        "API_TIMEOUT_MS": "3000000"
+      }
+    },
+    {
+      "name": "Kimi (Moonshot)",
+      "description": "Moonshot Kimi K2.5 (Anthropic-compatible)",
+      "baseUrl": "https://api.moonshot.ai/anthropic",
+      "authToken": "YOUR_MOONSHOT_API_KEY",
+      "models": {
+        "opus": "kimi-k2.5",
+        "sonnet": "kimi-k2.5",
+        "haiku": "kimi-k2.5"
+      }
+    },
+    {
+      "name": "DeepSeek",
+      "description": "DeepSeek V4 (Anthropic-compatible)",
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "apiKey": "sk-YOUR_DEEPSEEK_KEY",
+      "models": {
+        "opus": "deepseek-v4-pro",
+        "sonnet": "deepseek-v4-pro",
+        "haiku": "deepseek-v4-flash"
+      }
+    },
+    {
+      "name": "MiniMax",
+      "description": "MiniMax M2 series (Anthropic-compatible)",
+      "baseUrl": "https://api.minimax.io/anthropic",
+      "apiKey": "YOUR_MINIMAX_API_KEY",
+      "models": {
+        "opus": "MiniMax-M2.7",
+        "sonnet": "MiniMax-M2.5",
+        "haiku": "MiniMax-M2.1-highspeed"
+      }
+    },
+    {
+      "name": "OpenRouter",
+      "description": "OpenRouter 멀티모델 게이트웨이 — 추가 시 서버에서 모델 검색/선택",
+      "baseUrl": "https://openrouter.ai/api",
+      "apiKey": "sk-or-YOUR_KEY_HERE",
+      "models": {
+        "opus": "",
+        "sonnet": "",
+        "haiku": ""
+      }
+    },
+    {
+      "name": "LM Studio (local)",
+      "description": "로컬 LM Studio 서버 - 모델 ID는 LM Studio에 로드한 식별자로 교체",
+      "baseUrl": "http://localhost:1234",
+      "authToken": "lmstudio",
+      "models": {
+        "opus": "ibm/granite-4-micro",
+        "sonnet": "ibm/granite-4-micro",
+        "haiku": "ibm/granite-4-micro"
+      }
+    }
+  ]
+}
