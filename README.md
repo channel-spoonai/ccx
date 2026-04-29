@@ -26,23 +26,11 @@ irm https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.ps1 | iex
 
 ## 사용법
 
-**1. 설정 파일 만들기**
-
-```bash
-cp ccx.config.example.json ccx.config.json
-```
-
-**2. 사용할 프로바이더의 API 키 넣기**
-
-`ccx.config.json`을 열어 쓰려는 프로바이더 항목의 `YOUR_..._API_KEY` 자리에 실제 키를 붙여넣습니다. 쓰지 않는 프로바이더는 그대로 둬도 됩니다.
-
-**3. 실행**
-
 ```bash
 ccx
 ```
 
-메뉴에서 화살표 키로 프로파일을 고르면 해당 프로바이더로 연결된 `claude`가 뜹니다. 숫자 키로 바로 선택할 수도 있습니다.
+처음 실행하면 빈 메뉴가 뜹니다. **+ 새 프로바이더 추가**를 골라 카탈로그에서 프로바이더를 선택하고 API 키만 입력하면 `~/.config/ccx/ccx.config.json` 에 자동 저장됩니다. 그 다음부터는 메뉴에서 화살표 키로 프로파일을 고르면 해당 프로바이더로 연결된 `claude` 가 뜹니다. 숫자 키로 바로 선택할 수도 있습니다.
 
 ```text
   ccx — 프로파일을 선택하세요
@@ -79,17 +67,34 @@ ccx -xSet "GLM Coding Plan" --dangerously-skip-permissions
 ccx --dangerously-skip-permissions
 ```
 
+### 비대화형 한 줄 실행 (LM Studio 등 로컬 모델 활용)
+
+`-p`(claude의 print 모드)를 쓰면 응답을 받고 즉시 종료합니다. `--model`로 모델을 오버라이드할 수도 있어서, LM Studio에 로드한 임의의 로컬 모델을 명령어 한 줄로 호출하기 좋습니다.
+
+```bash
+# 프로파일에 지정된 모델 그대로 쓰기
+ccx -xSet "LM Studio (local)" -p "Go 채널 사용 예시 3줄로 요약해줘"
+
+# 모델만 바꿔서 호출 (LM Studio에 로드해둔 식별자 사용)
+ccx -xSet "LM Studio (local)" --model "qwen/qwen3-coder-30b" -p "이 함수 리팩토링 아이디어"
+
+# 셸 파이프와 조합 — 스크립트에서 LLM을 부르듯 사용
+cat src/main.go | ccx -xSet "LM Studio (local)" -p "버그 가능성 짚어줘"
+```
+
+같은 패턴이 모든 프로바이더에서 동작합니다 (예: `ccx -xSet "GLM Coding Plan" --model "GLM-4.7" -p "..."`). `-xSet` 외의 인자는 전부 그대로 `claude`에 전달되므로 [Claude Code CLI 레퍼런스](https://docs.claude.com/en/docs/claude-code/cli-reference)의 옵션을 모두 사용할 수 있습니다.
+
 ## 지원 프로바이더
 
 z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬)
 
-기본 설정은 `ccx.config.example.json`에 다 들어 있어 손댈 필요가 없습니다. API 키만 채우면 동작합니다.
+기본 설정은 바이너리에 카탈로그로 임베드되어 있어 손댈 필요가 없습니다. 메뉴에서 추가하고 API 키만 입력하면 동작합니다.
 
 ## 알아두면 좋은 점
 
 - **ChatGPT Plus / Codex 계정은 쓸 수 없습니다.** OpenAI는 Anthropic 호환 엔드포인트를 제공하지 않습니다.
 - **LM Studio(로컬)는 모델에 따라 품질 편차가 큽니다.** 툴 사용이나 긴 컨텍스트를 제대로 지원하지 않는 모델이 많습니다.
-- `ccx.config.json`은 `.gitignore`에 포함돼 있어 실수로 커밋되지 않습니다.
+- 설정 파일(`~/.config/ccx/ccx.config.json`)은 홈 디렉터리에 저장되며 권한은 `0600`으로 잠깁니다. 다른 경로를 쓰려면 `CCX_CONFIG` 환경변수로 오버라이드할 수 있습니다.
 
 ## 소스에서 빌드
 
