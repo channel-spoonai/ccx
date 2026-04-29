@@ -120,6 +120,8 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 		configureLMStudioModels(&tpl)
 	case isOR:
 		configureOpenRouterModels(&tpl)
+	default:
+		configureAnthropicModels(&tpl)
 	}
 
 	return &tpl, nil
@@ -249,7 +251,16 @@ func Edit(loaded *config.Loaded, index int) error {
 			edited.Models = promptModelsManual(edited.Models)
 		}
 	default:
-		edited.Models = promptModelsManual(edited.Models)
+		if edited.BaseURL != "" && (edited.AuthToken != "" || edited.APIKey != "") {
+			ans, _ := menu.PromptLine("모델 목록을 다시 조회할까요? (y/N)", menu.PromptOptions{})
+			if strings.EqualFold(strings.TrimSpace(ans), "y") {
+				configureAnthropicModels(&edited)
+			} else {
+				edited.Models = promptModelsManual(edited.Models)
+			}
+		} else {
+			edited.Models = promptModelsManual(edited.Models)
+		}
 	}
 
 	existing[index] = edited
@@ -402,53 +413,11 @@ func configureLMStudioModels(tpl *config.Profile) {
 	}
 	fmt.Printf("  \x1B[32m✓\x1B[0m %d개 모델 발견\n", len(res.Models))
 
-	baseItems := make([]menu.CatalogItem, 0, len(res.Models)+1)
+	items := make([]menu.CatalogItem, 0, len(res.Models))
 	for _, m := range res.Models {
-		baseItems = append(baseItems, menu.CatalogItem{Label: m, Payload: m})
+		items = append(items, menu.CatalogItem{Label: m, Payload: m})
 	}
-	skip := menu.CatalogItem{
-		Label:       "(이 티어는 설정하지 않음)",
-		Description: "환경변수 미지정 — Claude Code 기본 동작",
-		Payload:     "",
-		Pinned:      true,
-	}
-
-	cur := config.Models{}
-	if tpl.Models != nil {
-		cur = *tpl.Models
-	}
-	next := config.Models{}
-	for _, tier := range []struct {
-		name string
-		curr string
-		set  func(string)
-	}{
-		{"opus", cur.Opus, func(s string) { next.Opus = s }},
-		{"sonnet", cur.Sonnet, func(s string) { next.Sonnet = s }},
-		{"haiku", cur.Haiku, func(s string) { next.Haiku = s }},
-	} {
-		title := tier.name + " 티어 모델 선택"
-		if tier.curr != "" {
-			title += " — 현재: " + tier.curr
-		}
-		items := append([]menu.CatalogItem{}, baseItems...)
-		items = append(items, skip)
-		picked, _ := menu.SelectFromCatalog(items, title, 10)
-		if picked == nil {
-			if tier.curr != "" {
-				tier.set(tier.curr)
-			}
-			continue
-		}
-		if s, ok := picked.(string); ok && s != "" {
-			tier.set(s)
-		}
-	}
-	if next.Opus == "" && next.Sonnet == "" && next.Haiku == "" {
-		tpl.Models = nil
-	} else {
-		tpl.Models = &next
-	}
+	pickModelTiers(tpl, items)
 }
 
 func configureOpenRouterModels(tpl *config.Profile) {
@@ -471,14 +440,55 @@ func configureOpenRouterModels(tpl *config.Profile) {
 	}
 	fmt.Printf("  \x1B[32m✓\x1B[0m %d개 모델 발견\n", len(res.Models))
 
-	baseItems := make([]menu.CatalogItem, 0, len(res.Models)+1)
+	items := make([]menu.CatalogItem, 0, len(res.Models))
 	for _, m := range res.Models {
-		baseItems = append(baseItems, menu.CatalogItem{
+		items = append(items, menu.CatalogItem{
 			Label:       m.ID,
 			Description: providers.FormatDescription(m),
 			Payload:     m.ID,
 		})
 	}
+	pickModelTiers(tpl, items)
+}
+
+func configureAnthropicModels(tpl *config.Profile) {
+	if tpl.BaseURL == "" || (tpl.AuthToken == "" && tpl.APIKey == "") {
+		tpl.Models = promptModelsManual(tpl.Models)
+		return
+	}
+	fmt.Println()
+	fmt.Printf("  \x1B[36m[ccx]\x1B[0m 모델 목록 조회 중... \x1B[90m(%s/v1/models)\x1B[0m\n", strings.TrimRight(tpl.BaseURL, "/"))
+	res := providers.FetchAnthropicModels(tpl)
+	if res.Err != nil || len(res.Models) == 0 {
+		if res.Err != nil {
+			fmt.Printf("  \x1B[33m⚠ 조회 실패: %s\x1B[0m\n", res.Err)
+		} else {
+			fmt.Println("  \x1B[33m⚠ 모델 목록이 비어 있습니다.\x1B[0m")
+		}
+		fmt.Println("  \x1B[90m프로바이더가 /v1/models를 노출하지 않을 수 있습니다. 모델을 수동으로 입력하세요.\x1B[0m")
+		tpl.Models = promptModelsManual(tpl.Models)
+		return
+	}
+	fmt.Printf("  \x1B[32m✓\x1B[0m %d개 모델 발견\n", len(res.Models))
+
+	items := make([]menu.CatalogItem, 0, len(res.Models))
+	for _, m := range res.Models {
+		desc := ""
+		if m.DisplayName != "" && m.DisplayName != m.ID {
+			desc = m.DisplayName
+		}
+		items = append(items, menu.CatalogItem{
+			Label:       m.ID,
+			Description: desc,
+			Payload:     m.ID,
+		})
+	}
+	pickModelTiers(tpl, items)
+}
+
+// pickModelTiers walks opus → sonnet → haiku, letting the user pick a model
+// for each tier from the same item list. Esc on a tier keeps the prior value.
+func pickModelTiers(tpl *config.Profile, items []menu.CatalogItem) {
 	skip := menu.CatalogItem{
 		Label:       "(이 티어는 설정하지 않음)",
 		Description: "환경변수 미지정 — Claude Code 기본 동작",
@@ -504,11 +514,10 @@ func configureOpenRouterModels(tpl *config.Profile) {
 		if tier.curr != "" {
 			title += " — 현재: " + tier.curr
 		}
-		items := append([]menu.CatalogItem{}, baseItems...)
-		items = append(items, skip)
-		picked, _ := menu.SelectFromCatalog(items, title, 10)
+		menuItems := append([]menu.CatalogItem{}, items...)
+		menuItems = append(menuItems, skip)
+		picked, _ := menu.SelectFromCatalog(menuItems, title, 10)
 		if picked == nil {
-			// Esc: 기존 값 유지
 			if tier.curr != "" {
 				tier.set(tier.curr)
 			}
