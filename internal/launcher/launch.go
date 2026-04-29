@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/channel-spoonai/ccx/internal/config"
@@ -88,33 +87,6 @@ func replaceOrAppend(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
-}
-
-// Launch replaces the current process with claude on Unix, or runs it as a
-// child and propagates the exit code on Windows (exec is not available).
-func Launch(p *config.Profile, args []string) error {
-	env := BuildEnv(p)
-	printBanner(p)
-
-	binary, err := exec.LookPath(ClaudeCmd)
-	if err != nil {
-		return errClaudeNotFound
-	}
-
-	cmd := exec.Command(binary, args...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			os.Exit(exitErr.ExitCode())
-		}
-		return err
-	}
-	return nil
 }
 
 var errClaudeNotFound = errors.New(`"claude"를 찾을 수 없습니다. Claude Code가 설치되어 있나요? https://docs.anthropic.com/en/docs/claude-code`)

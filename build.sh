@@ -6,6 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p dist
 
+# 임베드용 사본을 모듈 루트의 정본과 동기화
+cp ccx.config.example.json internal/config/ccx.config.example.json
+
 TARGETS=(
   "darwin/amd64"
   "darwin/arm64"

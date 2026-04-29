@@ -1,11 +1,19 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// embeddedExample은 빌드 시점에 바이너리에 포함되는 카탈로그 사본.
+// 모듈 루트의 ccx.config.example.json은 정본이며, build.sh가 이 위치로 동기화한다.
+// 디스크에서 example 파일을 찾지 못할 때(설치 환경 등) LoadExample이 폴백으로 사용한다.
+//
+//go:embed ccx.config.example.json
+var embeddedExample []byte
 
 const (
 	Filename        = "ccx.config.json"
@@ -206,7 +214,10 @@ func LoadExample() ([]Profile, error) {
 	path := ExamplePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		if len(embeddedExample) == 0 {
+			return nil, err
+		}
+		raw = embeddedExample
 	}
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {

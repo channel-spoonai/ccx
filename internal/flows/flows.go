@@ -16,7 +16,10 @@ func Add(loaded *config.Loaded) error {
 	existing := loaded.Config.Profiles
 
 	var items []menu.CatalogItem
-	templates, _ := config.LoadExample()
+	templates, err := config.LoadExample()
+	if err != nil {
+		fmt.Printf("  \x1B[33m⚠ 카탈로그 로드 실패: %s\x1B[0m\n", err)
+	}
 	for i := range templates {
 		t := templates[i]
 		items = append(items, menu.CatalogItem{
