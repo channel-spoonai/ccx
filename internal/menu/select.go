@@ -38,7 +38,9 @@ type item struct {
 
 // SelectProfile renders the main menu and returns the user's action. Requires
 // a TTY; the caller should fall back to -xSet when stdin isn't interactive.
-func SelectProfile(profiles []config.Profile) (Action, error) {
+//
+// notice는 헤더 아래에 한 줄로 표시할 안내 (예: "v0.4.0"). 빈 문자열이면 생략.
+func SelectProfile(profiles []config.Profile, notice string) (Action, error) {
 	if !IsTTY() {
 		return Action{}, fmt.Errorf("인터랙티브 모드에는 TTY가 필요합니다. -xSet으로 프로파일을 지정하세요")
 	}
@@ -59,7 +61,11 @@ func SelectProfile(profiles []config.Profile) (Action, error) {
 	render := func() {
 		ClearScreen()
 		fmt.Print("\r\n")
-		fmt.Print("  \x1B[1m\x1B[36m ccx \x1B[0m\x1B[90m— 프로파일을 선택하세요\x1B[0m\r\n\r\n")
+		fmt.Print("  \x1B[1m\x1B[36m ccx \x1B[0m\x1B[90m— 프로파일을 선택하세요\x1B[0m\r\n")
+		if notice != "" {
+			fmt.Printf("  \x1B[33m⚑ 업데이트 %s 사용 가능 — `ccx update`\x1B[0m\r\n", notice)
+		}
+		fmt.Print("\r\n")
 		if len(profiles) == 0 {
 			fmt.Print("   \x1B[90m(등록된 프로파일이 없습니다)\x1B[0m\r\n\r\n")
 		}

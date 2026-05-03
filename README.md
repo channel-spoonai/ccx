@@ -24,6 +24,18 @@ The install script adds `~/.local/bin` to your PATH automatically. If it isn't i
 
 **Prerequisite:** [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI must be installed.
 
+### Update
+
+If ccx is already installed, update to the latest release with:
+
+```bash
+ccx update
+```
+
+ccx checks GitHub for new releases once a day and shows a one-line notice in the menu header when an update is available (cached at `~/.config/ccx/update-check.json`).
+
+Re-running the install script also works — it downloads the latest binary and overwrites the existing one.
+
 ## Usage
 
 ```bash

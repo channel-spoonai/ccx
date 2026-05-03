@@ -26,6 +26,18 @@ irm https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.ps1 | iex
 
 사전 준비: [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI가 설치돼 있어야 합니다.
 
+### 업데이트
+
+이미 설치된 ccx는 다음 명령으로 최신 릴리즈로 갱신합니다.
+
+```bash
+ccx update
+```
+
+ccx는 하루에 한 번 GitHub에서 새 릴리즈가 있는지 확인해, 새 버전이 나오면 메뉴 헤더에 한 줄로 안내합니다 (캐시는 `~/.config/ccx/update-check.json`).
+
+설치 스크립트를 다시 실행해도 됩니다 — 동일하게 최신 바이너리를 받아 덮어씁니다.
+
 ## 사용법
 
 ```bash

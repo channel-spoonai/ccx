@@ -14,6 +14,15 @@ import (
 	"github.com/channel-spoonai/ccx/internal/launcher"
 	"github.com/channel-spoonai/ccx/internal/menu"
 	proxy "github.com/channel-spoonai/ccx/internal/proxy/codex"
+	"github.com/channel-spoonai/ccx/internal/update"
+)
+
+// 빌드 시점에 ldflags로 주입된다 (.goreleaser.yaml).
+// dev 빌드는 build.sh가 "dev"를 주입 — update.IsDevBuild가 식별.
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
 )
 
 type parsedArgs struct {
@@ -42,6 +51,9 @@ func parseArgs(argv []string) parsedArgs {
 }
 
 func main() {
+	// 이전 `ccx update` 사이클이 남긴 .old 바이너리 잔재를 청소 (Windows 전용 no-op on Unix).
+	update.CleanupStaleBinary()
+
 	// Hidden 서브명령: 자식 데몬 모드. 부모 ccx가 SpawnDaemon으로 자기 자신을 재호출할 때 진입.
 	// 사용자에겐 노출하지 않으므로 help/문서에도 포함시키지 않는다.
 	if proxy.IsDaemonInvocation(os.Args) {
@@ -55,7 +67,16 @@ func main() {
 		return
 	}
 
+	// `ccx update` — 자동 자기 갱신.
+	if len(os.Args) >= 2 && os.Args[1] == "update" {
+		runUpdateCommand(os.Args[2:])
+		return
+	}
+
 	args := parseArgs(os.Args[1:])
+
+	// 24h에 한 번만 GitHub API 호출. 캐시 hit이면 즉시 노출, miss면 백그라운드 fetch만.
+	updateNotice := update.MaybeNotify(version)
 
 	loaded, err := config.Load()
 	if err != nil {
@@ -81,6 +102,9 @@ func main() {
 			}
 			os.Exit(1)
 		}
+		if updateNotice != "" {
+			fmt.Fprintf(os.Stderr, "[ccx] 새 버전 %s 사용 가능 — `ccx update`\n", updateNotice)
+		}
 		if err := launcher.Launch(profile, args.claudeArgs); err != nil {
 			if errors.Is(err, launcher.ErrClaudeNotFound()) {
 				fmt.Fprintln(os.Stderr, "Error:", err)
@@ -92,7 +116,7 @@ func main() {
 		return
 	}
 
-	runInteractive(loaded, args.claudeArgs)
+	runInteractive(loaded, args.claudeArgs, updateNotice)
 }
 
 // runCodexCommand는 사용자가 `ccx codex ...` 로 호출했을 때 진입.
@@ -206,8 +230,10 @@ func runProxyDaemon() {
 	err := proxy.RunDaemon(proxy.DaemonOptions{
 		ParentPID:    ppid,
 		SharedSecret: secret,
-		IdleTimeout:  10 * time.Minute,
-		ReadyWriter:  os.Stdout,
+		// IdleTimeout 비활성 — 부모 PID polling(1초 간격, ESRCH 감지)이 lifetime을 정확히 관리.
+		// 10분 idle로 자체 종료하면 사용자가 작업 재개 시 ConnectionRefused 발생.
+		IdleTimeout: 0,
+		ReadyWriter: os.Stdout,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[ccx codex-proxy]", err)
@@ -215,12 +241,12 @@ func runProxyDaemon() {
 	}
 }
 
-func runInteractive(loaded *config.Loaded, claudeArgs []string) {
+func runInteractive(loaded *config.Loaded, claudeArgs []string, updateNotice string) {
 	menu.EnterAltScreen()
 	defer menu.ExitAltScreen()
 
 	for {
-		action, err := menu.SelectProfile(loaded.Config.Profiles)
+		action, err := menu.SelectProfile(loaded.Config.Profiles, updateNotice)
 		if err != nil {
 			menu.ExitAltScreen()
 			fmt.Fprintln(os.Stderr, "Error:", err)

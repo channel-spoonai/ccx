@@ -17,6 +17,13 @@ TARGETS=(
   "windows/amd64"
 )
 
+# dev 빌드 식별자 — 정식 릴리즈는 goreleaser가 ldflags로 정확한 값 주입.
+# 여기서 "dev"를 박아두면 ccx update가 자동 갱신을 거부한다.
+VERSION="dev"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+
 for target in "${TARGETS[@]}"; do
   os="${target%/*}"
   arch="${target#*/}"
@@ -26,7 +33,7 @@ for target in "${TARGETS[@]}"; do
 
   echo "→ $out"
   GOOS="$os" GOARCH="$arch" \
-    go build -ldflags="-s -w" -trimpath \
+    go build -ldflags="${LDFLAGS}" -trimpath \
     -o "$out" ./cmd/ccx
 done
 
