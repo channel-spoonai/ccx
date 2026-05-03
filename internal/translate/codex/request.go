@@ -17,7 +17,12 @@ type TranslateOptions struct {
 	EffortOverride string
 }
 
-var validAnthropicEfforts = map[string]struct{}{"low": {}, "medium": {}, "high": {}, "max": {}}
+// Claude Code v2.1.117 이후 effort는 5단계 (low/medium/high/xhigh/max).
+// xhigh는 Opus 4.7의 기본값으로 high와 max 사이에 추가, max는 Opus 전용 최상위.
+var validAnthropicEfforts = map[string]struct{}{"low": {}, "medium": {}, "high": {}, "xhigh": {}, "max": {}}
+
+// Codex의 reasoning 메뉴는 4단계 (Low/Medium/High/Extra high).
+// Extra high의 API 값이 xhigh. none은 reasoning 비활성 옵션 (메뉴엔 없음).
 var validCodexEfforts = map[string]struct{}{"none": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {}}
 
 // TranslateRequest는 Anthropic 요청을 Codex Responses 요청으로 변환한다.
@@ -99,14 +104,21 @@ func TranslateRequest(req *AnthropicRequest, opts TranslateOptions) (*ResponsesR
 	return out, nil
 }
 
+// resolveEffort는 Claude Code 5단계를 Codex 4단계로 매핑한다.
+//
+//	low / medium / high / xhigh → 동일 (1:1)
+//	max                         → xhigh (Codex에 max 없음, 한 단계 clamp)
+//
+// override가 있으면 anthropicEffort를 무시하고 override를 그대로 사용 (Codex 표기).
 func resolveEffort(anthropicEffort, override string) (string, error) {
 	if anthropicEffort != "" {
 		if _, ok := validAnthropicEfforts[anthropicEffort]; !ok {
-			return "", fmt.Errorf(`output_config.effort 값이 잘못됨: %q (허용: low/medium/high/max)`, anthropicEffort)
+			return "", fmt.Errorf(`output_config.effort 값이 잘못됨: %q (허용: low/medium/high/xhigh/max)`, anthropicEffort)
 		}
 	}
 	codexEffort := anthropicEffort
 	if codexEffort == "max" {
+		// Codex에는 max가 없으므로 가능한 최대치인 xhigh로 clamp.
 		codexEffort = "xhigh"
 	}
 	if override != "" {

@@ -104,6 +104,42 @@ ccx가 로컬 프록시(랜덤 포트)를 띄워 Anthropic Messages 요청을 Op
 
 상태/로그아웃: `ccx codex status` / `ccx codex logout`
 
+#### 컨텍스트 윈도우 / reasoning 강도 조정
+
+- **컨텍스트 윈도우 hint**: Claude Code는 현재 `[1m]` 접미사만 인식 (1,050,000 토큰으로 표시). 임의 숫자(`[922k]`/`[272k]` 등)는 무시되어 default 200K로 떨어집니다. 모델별로 실제 한도와 가까운 표시를 얻으려면:
+
+  | 모델 | OpenAI 실제 max input | 권장 접미사 | Claude Code 표시 |
+  |---|---|---|---|
+  | gpt-5.5 | 922,000 | `[1m]` | 1M (거의 정확) |
+  | gpt-5.4 | 922,000 | `[1m]` | 1M (거의 정확) |
+  | gpt-5.4-mini | 272,000 | (없음) | 200K (안전한 under-estimate) |
+
+  ```json
+  "models": {
+    "opus":   "gpt-5.5[1m]",
+    "sonnet": "gpt-5.4[1m]",
+    "haiku":  "gpt-5.4-mini"
+  }
+  ```
+
+  ccx 프록시는 forward 직전 `[1m]` 접미사를 strip해 OpenAI에는 깨끗한 모델 ID만 전달합니다.
+
+- **reasoning effort 매핑** (Claude Code 5단계 ↔ Codex 4단계):
+
+  | Claude Code | Codex `reasoning.effort` | Codex 메뉴 |
+  |---|---|---|
+  | low | low | Low |
+  | medium | medium | Medium |
+  | high | high | High |
+  | xhigh | xhigh | Extra high |
+  | max | xhigh (clamped) | Extra high (Codex에 max 없음) |
+
+  Claude Code의 effort 옵션이 자동으로 Codex로 전달됩니다. 모든 요청에 대해 강제 override하려면 환경변수 `CCX_CODEX_EFFORT` (값: `low`/`medium`/`high`/`xhigh`/`max` 또는 Codex 표기 `none`) 또는 프로파일 `env` 맵 사용:
+
+  ```json
+  "env": { "CCX_CODEX_EFFORT": "xhigh" }
+  ```
+
 한계: reasoning 콘텐츠와 tool_result 내 이미지는 변환 과정에서 손실됩니다.
 
 ## 알아두면 좋은 점

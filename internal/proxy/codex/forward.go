@@ -131,8 +131,12 @@ func doForward(
 	}
 
 	if debugEnabled() {
-		fmt.Fprintf(os.Stderr, "[ccx codex-proxy] POST %s model=%s input_items=%d tools=%d session=%q\n",
-			auth.CodexAPIEndpoint, body.Model, len(body.Input), len(body.Tools), opts.SessionID)
+		effort := "(none)"
+		if body.Reasoning != nil && body.Reasoning.Effort != "" {
+			effort = body.Reasoning.Effort
+		}
+		fmt.Fprintf(os.Stderr, "[ccx codex-proxy] POST %s model=%s effort=%s input_items=%d tools=%d session=%q\n",
+			auth.CodexAPIEndpoint, body.Model, effort, len(body.Input), len(body.Tools), opts.SessionID)
 	}
 
 	resp, err := upstreamClient.Do(req)

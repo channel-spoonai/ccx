@@ -74,8 +74,8 @@
       "description": "ChatGPT Plus/Pro 구독으로 Codex 라우팅 — `ccx codex login` 선행 필요",
       "auth": "codex-oauth",
       "models": {
-        "opus": "gpt-5.5",
-        "sonnet": "gpt-5.4",
+        "opus": "gpt-5.5[1m]",
+        "sonnet": "gpt-5.4[1m]",
         "haiku": "gpt-5.4-mini"
       }
     }

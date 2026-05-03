@@ -256,6 +256,22 @@ func TestTranslateRequest_EffortAndJsonSchema(t *testing.T) {
 	}
 }
 
+func TestTranslateRequest_XhighOneToOne(t *testing.T) {
+	// Claude Code 5단계 중 xhigh는 Codex의 xhigh와 1:1 매핑이어야 한다.
+	req := &AnthropicRequest{
+		Model:        "gpt-5.5",
+		Messages:     []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"x"`)}},
+		OutputConfig: &AnthropicOutputConfig{Effort: "xhigh"},
+	}
+	out, err := TranslateRequest(req, TranslateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Reasoning == nil || out.Reasoning.Effort != "xhigh" {
+		t.Errorf("xhigh → xhigh 매핑 실패: %+v", out.Reasoning)
+	}
+}
+
 func TestTranslateRequest_InvalidEffortRejected(t *testing.T) {
 	req := &AnthropicRequest{
 		Model:        "x",

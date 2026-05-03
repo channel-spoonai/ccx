@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -200,7 +201,18 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	req.Model = stripContextSuffix(req.Model)
 
 	sessionID := r.Header.Get("x-claude-code-session-id")
-	codexReq, err := tr.TranslateRequest(&req, tr.TranslateOptions{SessionID: sessionID})
+
+	// CCX_CODEX_EFFORT 환경변수로 reasoning 강도를 강제 override 가능.
+	// 사용자 친화: Anthropic 표기 "max"를 입력해도 Codex의 xhigh로 받아들인다 (Codex에 max 없음).
+	override := os.Getenv("CCX_CODEX_EFFORT")
+	if override == "max" {
+		override = "xhigh"
+	}
+
+	codexReq, err := tr.TranslateRequest(&req, tr.TranslateOptions{
+		SessionID:      sessionID,
+		EffortOverride: override,
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
