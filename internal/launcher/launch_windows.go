@@ -15,14 +15,27 @@ import (
 // 같은 메뉴 reader goroutine이 콘솔 input handle을 공유하지만, Windows
 // 콘솔의 키 이벤트 큐 동작상 Unix만큼 race가 두드러지지 않는다.
 func Launch(p *config.Profile, args []string) error {
-	env := BuildEnv(p)
-	printBanner(p)
-
 	binary, err := exec.LookPath(ClaudeCmd)
 	if err != nil {
 		return errClaudeNotFound
 	}
 
+	if p.Auth == AuthCodexOAuth {
+		prepared, err := prepareCodexOAuth(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared)
+		printCodexOAuthBanner(prepared.BaseURL, "")
+		return runChildClaude(binary, args, BuildEnv(prepared))
+	}
+
+	env := BuildEnv(p)
+	printBanner(p)
+	return runChildClaude(binary, args, env)
+}
+
+func runChildClaude(binary string, args []string, env []string) error {
 	cmd := exec.Command(binary, args...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin

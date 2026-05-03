@@ -15,14 +15,24 @@ import (
 // 바이트 일부를 가로채어 한글 같은 UTF-8 multi-byte 시퀀스가 split된다.
 // 프로세스 교체 시 ccx 상태가 통째로 사라져 race가 원천적으로 사라진다.
 func Launch(p *config.Profile, args []string) error {
-	env := BuildEnv(p)
-	printBanner(p)
-
 	binary, err := exec.LookPath(ClaudeCmd)
 	if err != nil {
 		return errClaudeNotFound
 	}
 
+	if p.Auth == AuthCodexOAuth {
+		prepared, err := prepareCodexOAuth(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared)
+		printCodexOAuthBanner(prepared.BaseURL, "")
+		argv := append([]string{binary}, args...)
+		return syscall.Exec(binary, argv, BuildEnv(prepared))
+	}
+
+	env := BuildEnv(p)
+	printBanner(p)
 	argv := append([]string{binary}, args...)
 	return syscall.Exec(binary, argv, env)
 }

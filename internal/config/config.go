@@ -36,6 +36,11 @@ type Profile struct {
 	Model       string            `json:"model,omitempty"`
 	Models      *Models           `json:"models,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
+
+	// Auth 는 인증 방식 디스크리미네이터. 빈 문자열이면 기존 정적 토큰 흐름.
+	// "codex-oauth" 면 launcher가 ChatGPT(OpenAI Codex) OAuth 흐름으로 분기 —
+	// baseUrl/authToken/apiKey 필드는 무시되고 ccx가 로컬 프록시를 띄워 자동 주입한다.
+	Auth string `json:"auth,omitempty"`
 }
 
 type Config struct {

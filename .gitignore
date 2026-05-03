@@ -6,6 +6,7 @@ memo.md
 .env
 .env.*
 .CLAUDE.md
+CLAUDE.md
 
 # ── Build artifacts ─────────────────────────────────────────────
 dist/

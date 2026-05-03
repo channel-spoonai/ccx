@@ -68,6 +68,16 @@
         "sonnet": "ibm/granite-4-micro",
         "haiku": "ibm/granite-4-micro"
       }
+    },
+    {
+      "name": "ChatGPT (Codex)",
+      "description": "ChatGPT Plus/Pro 구독으로 Codex 라우팅 — `ccx codex login` 선행 필요",
+      "auth": "codex-oauth",
+      "models": {
+        "opus": "gpt-5.5",
+        "sonnet": "gpt-5.4",
+        "haiku": "gpt-5.4-mini"
+      }
     }
   ]
 }

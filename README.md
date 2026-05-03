@@ -1,6 +1,6 @@
 # ccx
 
-Claude Code를 z.ai GLM, Kimi, DeepSeek, MiniMax, OpenRouter, LM Studio 같은 다른 LLM 프로바이더로 돌려 쓰는 CLI 래퍼.
+Claude Code를 z.ai GLM, Kimi, DeepSeek, MiniMax, OpenRouter, LM Studio, **ChatGPT(Codex 구독)** 같은 다른 LLM 프로바이더로 돌려 쓰는 CLI 래퍼.
 
 매번 환경변수를 세팅할 필요 없이, 프로파일을 골라서 `claude`를 실행합니다.
 
@@ -86,13 +86,28 @@ cat src/main.go | ccx -xSet "LM Studio (local)" -p "버그 가능성 짚어줘"
 
 ## 지원 프로바이더
 
-z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬)
+z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬) · ChatGPT (Codex)
 
 기본 설정은 바이너리에 카탈로그로 임베드되어 있어 손댈 필요가 없습니다. 메뉴에서 추가하고 API 키만 입력하면 동작합니다.
 
+### ChatGPT (Codex) 구독으로 사용하기
+
+ChatGPT Plus/Pro/Business 구독을 OAuth로 인증해 그 빌링으로 Claude Code를 돌립니다. 별도 프록시 설치 없이 ccx에 내장.
+
+```bash
+ccx codex login                  # 브라우저가 열려 ChatGPT 계정으로 인증
+# 또는: ccx codex login --device  (헤드리스/SSH 환경)
+ccx -xSet "ChatGPT (Codex)" -p "안녕"
+```
+
+ccx가 로컬 프록시(랜덤 포트)를 띄워 Anthropic Messages 요청을 OpenAI Responses API로 변환·forwarding합니다. 토큰은 `~/.config/ccx/auth/codex.json` (mode 0600)에 저장되고 만료 5분 전 자동 refresh.
+
+상태/로그아웃: `ccx codex status` / `ccx codex logout`
+
+한계: reasoning 콘텐츠와 tool_result 내 이미지는 변환 과정에서 손실됩니다.
+
 ## 알아두면 좋은 점
 
-- **ChatGPT Plus / Codex 계정은 쓸 수 없습니다.** OpenAI는 Anthropic 호환 엔드포인트를 제공하지 않습니다.
 - **LM Studio(로컬)는 모델에 따라 품질 편차가 큽니다.** 툴 사용이나 긴 컨텍스트를 제대로 지원하지 않는 모델이 많습니다.
 - 설정 파일(`~/.config/ccx/ccx.config.json`)은 홈 디렉터리에 저장되며 권한은 `0600`으로 잠깁니다. 다른 경로를 쓰려면 `CCX_CONFIG` 환경변수로 오버라이드할 수 있습니다.
 

@@ -1,7 +1,7 @@
 {
   "profiles": [
     {
-      "name": "GLM Coding Plan",
+      "name": "glm",
       "description": "z.ai GLM (Anthropic-compatible)",
       "baseUrl": "https://api.z.ai/api/anthropic",
       "authToken": "YOUR_ZAI_API_KEY",
@@ -15,7 +15,7 @@
       }
     },
     {
-      "name": "Kimi (Moonshot)",
+      "name": "kimi",
       "description": "Moonshot Kimi K2.5 (Anthropic-compatible)",
       "baseUrl": "https://api.moonshot.ai/anthropic",
       "authToken": "YOUR_MOONSHOT_API_KEY",
@@ -67,6 +67,16 @@
         "opus": "ibm/granite-4-micro",
         "sonnet": "ibm/granite-4-micro",
         "haiku": "ibm/granite-4-micro"
+      }
+    },
+    {
+      "name": "Codex",
+      "description": "ChatGPT Plus/Pro 구독으로 Codex 라우팅 — `ccx codex login` 선행 필요",
+      "auth": "codex-oauth",
+      "models": {
+        "opus": "gpt-5.5",
+        "sonnet": "gpt-5.4",
+        "haiku": "gpt-5.4-mini"
       }
     }
   ]
