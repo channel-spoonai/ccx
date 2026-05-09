@@ -40,7 +40,7 @@ type DaemonOptions struct {
 func RunDaemon(opts DaemonOptions) error {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Errorf("프록시 listen 실패: %w", err)
+		return fmt.Errorf("proxy listen failed: %w", err)
 	}
 
 	srv, err := Start(ServerOptions{

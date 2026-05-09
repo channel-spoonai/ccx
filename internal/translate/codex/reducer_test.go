@@ -78,7 +78,7 @@ func TestReduceUpstream_ToolUseFlowAndStopReason(t *testing.T) {
 		t.Fatalf("events: %+v", events)
 	}
 	if events[0].Kind != EventToolStart || events[0].ToolID != "c1" || events[0].ToolName != "Bash" {
-		t.Errorf("tool-start 잘못됨: %+v", events[0])
+		t.Errorf("malformed tool-start: %+v", events[0])
 	}
 	// 마지막 이벤트는 finish이고 stop reason은 tool_use.
 	last := events[len(events)-1]
@@ -108,14 +108,14 @@ func TestReduceUpstream_ReadToolBuffersUntilDone(t *testing.T) {
 		return true
 	})
 	if len(deltas) != 1 {
-		t.Fatalf("Read 도구는 done에서 한 번에 emit되어야 함, got %d (%+v)", len(deltas), deltas)
+		t.Fatalf("Read tool should emit once on done, got %d (%+v)", len(deltas), deltas)
 	}
 	// pages="" 가 sanitize되어야 함.
 	if strings.Contains(deltas[0], "pages") {
-		t.Errorf("pages 필드가 sanitize되지 않음: %s", deltas[0])
+		t.Errorf("pages field was not sanitized: %s", deltas[0])
 	}
 	if !strings.Contains(deltas[0], `"file":"a.go"`) {
-		t.Errorf("file 필드 누락: %s", deltas[0])
+		t.Errorf("file field missing: %s", deltas[0])
 	}
 }
 
@@ -135,7 +135,7 @@ func TestReduceUpstream_ReasoningItemsIgnored(t *testing.T) {
 		return true
 	})
 	if startCount != 0 {
-		t.Errorf("reasoning이 새 블록을 만들었음: %d", startCount)
+		t.Errorf("reasoning created a new block: %d", startCount)
 	}
 }
 
@@ -147,10 +147,10 @@ func TestReduceUpstream_RateLimitSurfaced(t *testing.T) {
 	err := ReduceUpstream(strings.NewReader(stream), func(e ReducerEvent) bool { return true })
 	var up *UpstreamError
 	if !errors.As(err, &up) || up.Kind != ErrorRateLimit {
-		t.Fatalf("rate_limit 에러가 surface 안됨: %v", err)
+		t.Fatalf("rate_limit error not surfaced: %v", err)
 	}
 	if up.RetryAfterSeconds != 42 {
-		t.Errorf("retry_after 누락: %d", up.RetryAfterSeconds)
+		t.Errorf("retry_after missing: %d", up.RetryAfterSeconds)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestReduceUpstream_ResponseFailed(t *testing.T) {
 	err := ReduceUpstream(strings.NewReader(stream), func(e ReducerEvent) bool { return true })
 	var up *UpstreamError
 	if !errors.As(err, &up) || up.Kind != ErrorFailed {
-		t.Fatalf("failed 에러 surface 안됨: %v", err)
+		t.Fatalf("failed error not surfaced: %v", err)
 	}
 	if up.Message != "boom" {
 		t.Errorf("message: %q", up.Message)
@@ -186,7 +186,7 @@ func TestReduceUpstream_IncompleteStopReason(t *testing.T) {
 		return true
 	})
 	if last.Kind != EventFinish || last.StopReason != StopMaxTokens {
-		t.Errorf("incomplete → max_tokens 매핑 실패: %+v", last)
+		t.Errorf("incomplete → max_tokens mapping failed: %+v", last)
 	}
 }
 
@@ -213,6 +213,6 @@ func TestMapUsage_SubtractsCachedTokens(t *testing.T) {
 func TestMapUsage_NilSafe(t *testing.T) {
 	got := MapUsage(nil)
 	if got.InputTokens != 0 || got.OutputTokens != 0 {
-		t.Errorf("nil usage 처리 실패: %+v", got)
+		t.Errorf("nil usage handling failed: %+v", got)
 	}
 }

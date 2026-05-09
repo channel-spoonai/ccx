@@ -58,20 +58,20 @@ func FetchLatest(ctx context.Context) (*Release, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GitHub API 요청 실패: %w", err)
+		return nil, fmt.Errorf("GitHub API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("GitHub API 응답 오류 (%d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API error response (%d): %s", resp.StatusCode, string(body))
 	}
 	var rel Release
 	if err := json.Unmarshal(body, &rel); err != nil {
-		return nil, fmt.Errorf("릴리즈 응답 파싱 실패: %w", err)
+		return nil, fmt.Errorf("failed to parse release response: %w", err)
 	}
 	if rel.TagName == "" {
-		return nil, errors.New("릴리즈 응답에 tag_name이 비어있습니다")
+		return nil, errors.New("release response has empty tag_name")
 	}
 	return &rel, nil
 }
@@ -85,7 +85,7 @@ func (r *Release) AssetFor(goos, goarch string) (string, error) {
 			return a.DownloadURL, nil
 		}
 	}
-	return "", fmt.Errorf("아카이브를 찾을 수 없습니다: %s", want)
+	return "", fmt.Errorf("archive not found: %s", want)
 }
 
 func assetName(ver, goos, goarch string) string {
@@ -114,14 +114,14 @@ func Download(ctx context.Context, url string, w io.Writer) error {
 	dl := &http.Client{Timeout: 0}
 	resp, err := dl.Do(req)
 	if err != nil {
-		return fmt.Errorf("다운로드 실패: %w", err)
+		return fmt.Errorf("download failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("다운로드 응답 오류 (%d) — %s", resp.StatusCode, url)
+		return fmt.Errorf("download error response (%d) — %s", resp.StatusCode, url)
 	}
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		return fmt.Errorf("다운로드 스트림 오류: %w", err)
+		return fmt.Errorf("download stream error: %w", err)
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ func runUpdateCommand(argv []string) {
 			printUpdateUsage()
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "Error: 알 수 없는 인자 %q\n\n", a)
+			fmt.Fprintf(os.Stderr, "Error: unknown argument %q\n\n", a)
 			printUpdateUsage()
 			os.Exit(1)
 		}
@@ -26,12 +26,12 @@ func runUpdateCommand(argv []string) {
 	defer cancel()
 
 	if err := update.Apply(ctx, version, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "[ccx] 업데이트 실패:", err)
+		fmt.Fprintln(os.Stderr, "[ccx] update failed:", err)
 		os.Exit(1)
 	}
 }
 
 func printUpdateUsage() {
-	fmt.Println(`사용법:
-  ccx update    GitHub 최신 릴리즈로 ccx 바이너리를 갱신`)
+	fmt.Println(`Usage:
+  ccx update    Update the ccx binary to the latest GitHub release`)
 }

@@ -47,11 +47,11 @@ func LoadAuth() (*StoredAuth, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("토큰 파일 읽기 실패: %w", err)
+		return nil, fmt.Errorf("failed to read token file: %w", err)
 	}
 	var auth StoredAuth
 	if err := json.Unmarshal(raw, &auth); err != nil {
-		return nil, fmt.Errorf("토큰 파일 파싱 실패: %w", err)
+		return nil, fmt.Errorf("failed to parse token file: %w", err)
 	}
 	return &auth, nil
 }
@@ -61,7 +61,7 @@ func SaveAuth(auth *StoredAuth) error {
 	path := authPath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("디렉토리 생성 실패: %w", err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	// 기존 디렉토리가 더 느슨한 퍼미션이면 타이트닝 (config.go 패턴 따름).
 	_ = os.Chmod(dir, 0o700)
@@ -74,11 +74,11 @@ func SaveAuth(auth *StoredAuth) error {
 
 	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
 	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
-		return fmt.Errorf("토큰 파일 쓰기 실패: %w", err)
+		return fmt.Errorf("failed to write token file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("토큰 파일 rename 실패: %w", err)
+		return fmt.Errorf("failed to rename token file: %w", err)
 	}
 	return nil
 }

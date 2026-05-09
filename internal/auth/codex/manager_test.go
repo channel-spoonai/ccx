@@ -95,7 +95,7 @@ func TestManager_AutoRefreshNearExpiry(t *testing.T) {
 			t.Errorf("expected refresh_token grant, got %s", body)
 		}
 		if !strings.Contains(string(body), "refresh_token=rtk") {
-			t.Errorf("기존 refresh_token이 전달되지 않음: %s", body)
+			t.Errorf("existing refresh_token was not forwarded: %s", body)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new","refresh_token":"rtk2","expires_in":3600}`))
@@ -108,16 +108,16 @@ func TestManager_AutoRefreshNearExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if tok != "new" {
-		t.Errorf("got %q, want new (refresh됐어야 함)", tok)
+		t.Errorf("got %q, want new (token should have been refreshed)", tok)
 	}
 	if atomic.LoadInt32(&refreshCount) != 1 {
-		t.Errorf("refresh 호출 횟수: got %d, want 1", refreshCount)
+		t.Errorf("refresh call count: got %d, want 1", refreshCount)
 	}
 
 	// 디스크에도 새 토큰이 저장됐는지 확인.
 	stored, _ := LoadAuth()
 	if stored == nil || stored.AccessToken != "new" || stored.RefreshToken != "rtk2" {
-		t.Errorf("디스크 토큰이 갱신되지 않음: %+v", stored)
+		t.Errorf("disk token was not updated: %+v", stored)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestManager_ConcurrentGetCallsRefreshOnce(t *testing.T) {
 		}
 	}
 	if got := atomic.LoadInt32(&refreshCount); got != 1 {
-		t.Errorf("동시 호출 시 refresh가 %d회 (single-flight 보장 깨짐, want 1)", got)
+		t.Errorf("concurrent calls refreshed %d times (single-flight broken, want 1)", got)
 	}
 }
 
@@ -187,6 +187,6 @@ func TestManager_PersistInitial_SavesAndCaches(t *testing.T) {
 	}
 	stored, _ := LoadAuth()
 	if stored == nil || stored.AccessToken != "a" {
-		t.Errorf("디스크에 저장 안됨: %+v", stored)
+		t.Errorf("not saved to disk: %+v", stored)
 	}
 }

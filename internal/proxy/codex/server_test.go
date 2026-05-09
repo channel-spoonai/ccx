@@ -151,7 +151,7 @@ func TestServer_StreamingRoundTrip(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 헤더 검증.
 		if r.Header.Get("Authorization") != "Bearer atk" {
-			t.Errorf("Authorization 헤더: %q", r.Header.Get("Authorization"))
+			t.Errorf("Authorization header: %q", r.Header.Get("Authorization"))
 		}
 		if r.Header.Get("ChatGPT-Account-Id") != "acct_test" {
 			t.Errorf("ChatGPT-Account-Id: %q", r.Header.Get("ChatGPT-Account-Id"))
@@ -195,7 +195,7 @@ func TestServer_StreamingRoundTrip(t *testing.T) {
 		"event: message_stop",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("응답에 %q 누락:\n%s", want, got)
+			t.Errorf("response missing %q:\n%s", want, got)
 		}
 	}
 }
@@ -236,7 +236,7 @@ func TestServer_NonStreamingReturnsJSON(t *testing.T) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	if out.Type != "message" || len(out.Content) != 1 || out.Content[0].Text != "answer" {
-		t.Errorf("응답 구조 잘못됨: %+v", out)
+		t.Errorf("malformed response structure: %+v", out)
 	}
 }
 
@@ -260,7 +260,7 @@ func TestServer_StripsContextSuffix(t *testing.T) {
 	body := strings.NewReader(`{"model":"gpt-5.4[1m]","messages":[]}`)
 	_, _ = http.Post("http://"+s.listener.Addr().String()+"/v1/messages", "application/json", body)
 	if seenModel != "gpt-5.4" {
-		t.Errorf("[1m] 접미사가 strip되지 않음: %q", seenModel)
+		t.Errorf("[1m] suffix was not stripped: %q", seenModel)
 	}
 }
 
@@ -288,7 +288,7 @@ func TestServer_RateLimitFromUpstream(t *testing.T) {
 		t.Errorf("got %d, want 429", resp.StatusCode)
 	}
 	if resp.Header.Get("Retry-After") != "5" {
-		t.Errorf("Retry-After 누락: %q", resp.Header.Get("Retry-After"))
+		t.Errorf("Retry-After missing: %q", resp.Header.Get("Retry-After"))
 	}
 }
 
@@ -307,7 +307,7 @@ func TestServer_CountTokensReturnsEstimate(t *testing.T) {
 	var out map[string]int
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	if out["input_tokens"] < 1 {
-		t.Errorf("input_tokens > 0 이어야 함: %+v", out)
+		t.Errorf("expected input_tokens > 0: %+v", out)
 	}
 }
 
@@ -315,7 +315,7 @@ func TestServer_NotAuthenticatedReturns401(t *testing.T) {
 	withTempHome(t)
 	// 토큰 파일을 고의로 만들지 않음.
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("upstream으로 가지 말아야 함")
+		t.Error("must not reach upstream")
 	}))
 	defer mock.Close()
 	rerouteUpstream(t, mock.URL)

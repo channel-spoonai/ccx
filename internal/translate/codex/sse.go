@@ -68,7 +68,7 @@ func ParseSSE(r io.Reader, fn func(SSEEvent) bool) error {
 				}
 				return nil
 			}
-			return fmt.Errorf("SSE 읽기 실패: %w", err)
+			return fmt.Errorf("SSE read failed: %w", err)
 		}
 	}
 }

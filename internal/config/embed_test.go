@@ -11,10 +11,10 @@ import (
 func TestEmbeddedExampleInSyncWithRoot(t *testing.T) {
 	root, err := os.ReadFile("../../ccx.config.example.json")
 	if err != nil {
-		t.Fatalf("정본 example 읽기 실패: %v", err)
+		t.Fatalf("failed to read canonical example: %v", err)
 	}
 	if !bytes.Equal(root, embeddedExample) {
-		t.Fatal("internal/config/ccx.config.example.json 사본이 모듈 루트 정본과 다릅니다. " +
-			"`./build.sh` 또는 `cp ccx.config.example.json internal/config/`로 동기화하세요.")
+		t.Fatal("internal/config/ccx.config.example.json copy differs from the module root. " +
+			"Run `./build.sh` or `cp ccx.config.example.json internal/config/` to sync.")
 	}
 }

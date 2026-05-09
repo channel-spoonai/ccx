@@ -49,7 +49,7 @@
     },
     {
       "name": "OpenRouter",
-      "description": "OpenRouter 멀티모델 게이트웨이 — 추가 시 서버에서 모델 검색/선택",
+      "description": "OpenRouter multi-model gateway — search and pick models from the server when adding",
       "baseUrl": "https://openrouter.ai/api",
       "apiKey": "sk-or-YOUR_KEY_HERE",
       "models": {
@@ -60,7 +60,7 @@
     },
     {
       "name": "LM Studio (local)",
-      "description": "로컬 LM Studio 서버 - 모델 ID는 LM Studio에 로드한 식별자로 교체",
+      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio",
       "baseUrl": "http://localhost:1234",
       "authToken": "lmstudio",
       "models": {
@@ -71,7 +71,7 @@
     },
     {
       "name": "Codex",
-      "description": "ChatGPT Plus/Pro 구독으로 Codex 라우팅 — `ccx codex login` 선행 필요",
+      "description": "Route Codex via your ChatGPT Plus/Pro subscription — run `ccx codex login` first",
       "auth": "codex-oauth",
       "models": {
         "opus": "gpt-5.5[1m]",

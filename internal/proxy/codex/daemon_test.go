@@ -41,25 +41,25 @@ func TestRunDaemon_ReadyWriterReceivesPort(t *testing.T) {
 			t.Fatalf("RunDaemon: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("RunDaemon이 idle timeout 안에 종료하지 않음")
+		t.Fatal("RunDaemon did not exit within idle timeout")
 	}
 
 	got := ready.String()
 	if !strings.HasPrefix(got, "ready ") || !strings.HasSuffix(got, "\n") {
-		t.Errorf("ready 메시지 형식 오류: %q", got)
+		t.Errorf("malformed ready message: %q", got)
 	}
 	parts := strings.Fields(strings.TrimSpace(got))
 	if len(parts) != 2 {
-		t.Fatalf("ready 메시지가 2개 토큰이 아님: %q", got)
+		t.Fatalf("ready message did not contain 2 tokens: %q", got)
 	}
 	if port, err := strconv.Atoi(parts[1]); err != nil || port <= 0 {
-		t.Errorf("ready 포트 파싱 실패: %q", got)
+		t.Errorf("failed to parse ready port: %q", got)
 	}
 }
 
 func TestRunDaemon_ParentDeathTriggersShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("PID polling은 unix 전용 가정")
+		t.Skip("PID polling assumed unix-only")
 	}
 	withTempHome(t)
 
@@ -85,16 +85,16 @@ func TestRunDaemon_ParentDeathTriggersShutdown(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Errorf("RunDaemon 종료 에러: %v", err)
+			t.Errorf("RunDaemon exit error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("부모 사망 후 데몬이 5초 안에 종료되지 않음")
+		t.Fatal("daemon did not exit within 5s after parent died")
 	}
 }
 
 func TestProcessAlive(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("processAlive는 unix signal 기반")
+		t.Skip("processAlive relies on unix signals")
 	}
 	// 자기 자신은 살아있어야 함.
 	if !processAlive(os.Getpid()) {
@@ -110,7 +110,7 @@ func TestProcessAlive(t *testing.T) {
 // 실제 자식 데몬과 핸드셰이크하는 통합 테스트.
 func TestSpawnDaemon_EndToEnd(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("ccx 빌드는 unix-only path에서 검증")
+		t.Skip("ccx build verified on unix-only path")
 	}
 	withTempHome(t)
 	seedDaemonAuth(t)
@@ -121,7 +121,7 @@ func TestSpawnDaemon_EndToEnd(t *testing.T) {
 	build := exec.Command("go", "build", "-o", binPath, "./cmd/ccx")
 	build.Dir = repoRoot(t)
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("ccx 빌드 실패: %v\n%s", err, out)
+		t.Fatalf("ccx build failed: %v\n%s", err, out)
 	}
 
 	// SpawnDaemon은 os.Executable()을 self로 쓰므로, 직접 호출하지 않고 바이너리를 직접 spawn.
@@ -147,13 +147,13 @@ func TestSpawnDaemon_EndToEnd(t *testing.T) {
 
 	port, err := readReady(stdout, 5*time.Second)
 	if err != nil {
-		t.Fatalf("ready 파싱 실패: %v", err)
+		t.Fatalf("failed to parse ready: %v", err)
 	}
 
 	// 헬스체크 호출.
 	resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/healthz")
 	if err != nil {
-		t.Fatalf("healthz 요청 실패: %v", err)
+		t.Fatalf("healthz request failed: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -170,7 +170,7 @@ func TestSpawnDaemon_EndToEnd(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 401 {
-		t.Errorf("잘못된 secret status: %d, want 401", resp.StatusCode)
+		t.Errorf("wrong-secret status: %d, want 401", resp.StatusCode)
 	}
 }
 
@@ -205,15 +205,15 @@ func TestReadReady_TimeoutSurfaced(t *testing.T) {
 	defer pr.Close()
 	_, err := readReady(pr, 50*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "timeout") {
-		t.Errorf("timeout 에러여야 함: %v", err)
+		t.Errorf("expected timeout error: %v", err)
 	}
 }
 
 func TestReadReady_MalformedRejected(t *testing.T) {
 	r := strings.NewReader("not-ready 12345\n")
 	_, err := readReady(r, 1*time.Second)
-	if err == nil || !strings.Contains(err.Error(), "형식 오류") {
-		t.Errorf("형식 오류로 거부되어야 함: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "malformed") {
+		t.Errorf("expected malformed-message rejection: %v", err)
 	}
 }
 

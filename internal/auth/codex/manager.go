@@ -10,7 +10,7 @@ import (
 
 // ErrNotAuthenticated는 토큰 파일이 없을 때 반환된다.
 // 호출자는 이걸 잡고 사용자에게 `ccx codex login`을 안내해야 한다.
-var ErrNotAuthenticated = errors.New("Codex OAuth 인증 안됨 — `ccx codex login` 을 먼저 실행하세요")
+var ErrNotAuthenticated = errors.New("Codex OAuth not authenticated — run `ccx codex login` first")
 
 // Manager는 토큰을 메모리 캐시하고, 만료 임박 시 자동 refresh한다.
 // 동시 요청에서 refresh가 중복 실행되지 않도록 single-flight 보장.
@@ -109,7 +109,7 @@ func (m *Manager) ensureFresh(ctx context.Context) (*StoredAuth, error) {
 func (m *Manager) doRefresh(ctx context.Context, current *StoredAuth) (*StoredAuth, error) {
 	tok, err := RefreshTokens(ctx, current.RefreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("토큰 refresh 실패: %w", err)
+		return nil, fmt.Errorf("token refresh failed: %w", err)
 	}
 	next := fromTokenResponse(tok)
 	// refresh_token이 비어있는 응답이면 기존 것 유지 (raine과 동일).
@@ -120,7 +120,7 @@ func (m *Manager) doRefresh(ctx context.Context, current *StoredAuth) (*StoredAu
 		next.AccountID = current.AccountID
 	}
 	if err := SaveAuth(next); err != nil {
-		return nil, fmt.Errorf("refresh된 토큰 저장 실패: %w", err)
+		return nil, fmt.Errorf("failed to save refreshed token: %w", err)
 	}
 	return next, nil
 }

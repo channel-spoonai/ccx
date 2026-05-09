@@ -41,7 +41,7 @@ func TestBuildInstructions_StripsBillingHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != "real" {
-		t.Errorf("got %q (billing header가 strip되지 않음)", got)
+		t.Errorf("got %q (billing header was not stripped)", got)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestBuildInput_UserTextOnlyEmitsSingleMessage(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	if len(got[0].Content) != 1 || got[0].Content[0].Type != "input_text" || got[0].Content[0].Text != "hello" {
-		t.Errorf("user content 매핑 잘못됨: %+v", got[0].Content)
+		t.Errorf("user content mapping wrong: %+v", got[0].Content)
 	}
 }
 
@@ -90,16 +90,16 @@ func TestBuildInput_ToolResultSplitsUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 3 {
-		t.Fatalf("split 결과 3개여야 함, got %d (%+v)", len(got), got)
+		t.Fatalf("expected 3 split results, got %d (%+v)", len(got), got)
 	}
 	if got[0].Type != "message" || got[0].Content[0].Text != "before" {
-		t.Errorf("첫 message가 잘못됨: %+v", got[0])
+		t.Errorf("first message wrong: %+v", got[0])
 	}
 	if got[1].Type != "function_call_output" || got[1].CallID != "call_1" || got[1].Output != "result body" {
-		t.Errorf("function_call_output 매핑 잘못됨: %+v", got[1])
+		t.Errorf("function_call_output mapping wrong: %+v", got[1])
 	}
 	if got[2].Type != "message" || got[2].Content[0].Text != "after" {
-		t.Errorf("끝 message가 잘못됨: %+v", got[2])
+		t.Errorf("trailing message wrong: %+v", got[2])
 	}
 }
 
@@ -109,7 +109,7 @@ func TestBuildInput_ToolResultErrorPrefix(t *testing.T) {
 	]`)
 	got, _ := buildInput([]AnthropicMessage{{Role: "user", Content: content}})
 	if len(got) != 1 || !strings.Contains(got[0].Output, "[tool execution error]") {
-		t.Errorf("error prefix 누락: %+v", got)
+		t.Errorf("error prefix missing: %+v", got)
 	}
 }
 
@@ -125,10 +125,10 @@ func TestBuildInput_ToolResultImageOmitted(t *testing.T) {
 		t.Fatalf("got %d items", len(got))
 	}
 	if !strings.Contains(got[0].Output, "[image omitted: image/png]") {
-		t.Errorf("이미지 placeholder 누락: %q", got[0].Output)
+		t.Errorf("image placeholder missing: %q", got[0].Output)
 	}
 	if !strings.Contains(got[0].Output, "see") {
-		t.Errorf("text 부분 누락: %q", got[0].Output)
+		t.Errorf("text portion missing: %q", got[0].Output)
 	}
 }
 
@@ -140,16 +140,16 @@ func TestBuildInput_AssistantTextAndToolUseInterleaved(t *testing.T) {
 	]`)
 	got, _ := buildInput([]AnthropicMessage{{Role: "assistant", Content: content}})
 	if len(got) != 3 {
-		t.Fatalf("got %d, want 3 (text → function_call → text 순서 유지)", len(got))
+		t.Fatalf("got %d, want 3 (text → function_call → text order preserved)", len(got))
 	}
 	if got[0].Role != "assistant" || got[0].Content[0].Type != "output_text" {
-		t.Errorf("assistant text role/type 잘못됨: %+v", got[0])
+		t.Errorf("assistant text role/type wrong: %+v", got[0])
 	}
 	if got[1].Type != "function_call" || got[1].CallID != "call_42" || got[1].Name != "Bash" {
-		t.Errorf("function_call 매핑 잘못됨: %+v", got[1])
+		t.Errorf("function_call mapping wrong: %+v", got[1])
 	}
 	if got[1].Arguments != `{"cmd":"ls"}` {
-		t.Errorf("arguments JSON 그대로 보존되어야 함: got %q", got[1].Arguments)
+		t.Errorf("arguments JSON should be preserved verbatim: got %q", got[1].Arguments)
 	}
 }
 
@@ -157,7 +157,7 @@ func TestBuildInput_AssistantToolUseEmptyInputBecomesEmptyObject(t *testing.T) {
 	content := mustJSON(t, `[{"type":"tool_use","id":"c","name":"Bash"}]`)
 	got, _ := buildInput([]AnthropicMessage{{Role: "assistant", Content: content}})
 	if len(got) != 1 || got[0].Arguments != "{}" {
-		t.Errorf("빈 input은 {} 으로 직렬화되어야 함: %+v", got)
+		t.Errorf("empty input should serialize to {}: %+v", got)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestMapToolChoice(t *testing.T) {
 		{"none", &AnthropicToolChoice{Type: "none"}, `"none"`},
 		{"any → required", &AnthropicToolChoice{Type: "any"}, `"required"`},
 		{"tool with name", &AnthropicToolChoice{Type: "tool", Name: "Bash"}, `{"type":"function","name":"Bash"}`},
-		{"tool 무명 → required", &AnthropicToolChoice{Type: "tool"}, `"required"`},
+		{"tool without name → required", &AnthropicToolChoice{Type: "tool"}, `"required"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -203,28 +203,28 @@ func TestTranslateRequest_FullExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out.Model != "gpt-5.4" {
-		t.Errorf("model 누락: %s", out.Model)
+		t.Errorf("model missing: %s", out.Model)
 	}
 	if out.Instructions != "be brief" {
 		t.Errorf("instructions: %q", out.Instructions)
 	}
 	if !out.Stream || out.Store {
-		t.Errorf("stream=true, store=false 강제: got stream=%v store=%v", out.Stream, out.Store)
+		t.Errorf("stream=true, store=false should be forced: got stream=%v store=%v", out.Stream, out.Store)
 	}
 	if !out.ParallelToolCalls {
-		t.Errorf("parallel_tool_calls 기본 true 여야 함")
+		t.Errorf("parallel_tool_calls should default to true")
 	}
 	if out.PromptCacheKey != "sess-1" {
-		t.Errorf("prompt_cache_key 누락")
+		t.Errorf("prompt_cache_key missing")
 	}
 	if len(out.Tools) != 1 || out.Tools[0].Type != "function" || out.Tools[0].Name != "Bash" {
-		t.Errorf("tools 매핑 잘못됨: %+v", out.Tools)
+		t.Errorf("tools mapping wrong: %+v", out.Tools)
 	}
 	if string(out.ToolChoice) != `"auto"` {
-		t.Errorf("tool_choice 기본값 'auto' 여야 함, got %s", out.ToolChoice)
+		t.Errorf("tool_choice should default to 'auto', got %s", out.ToolChoice)
 	}
 	if out.Text == nil || out.Text.Verbosity != "low" {
-		t.Errorf("text.verbosity=low 기본값 누락")
+		t.Errorf("text.verbosity=low default missing")
 	}
 }
 
@@ -246,13 +246,13 @@ func TestTranslateRequest_EffortAndJsonSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out.Reasoning == nil || out.Reasoning.Effort != "xhigh" {
-		t.Errorf("max → xhigh 매핑 실패: %+v", out.Reasoning)
+		t.Errorf("max → xhigh mapping failed: %+v", out.Reasoning)
 	}
 	if len(out.Include) == 0 || out.Include[0] != "reasoning.encrypted_content" {
-		t.Errorf("reasoning include 누락")
+		t.Errorf("reasoning include missing")
 	}
 	if out.Text.Format == nil || out.Text.Format.Type != "json_schema" || !out.Text.Format.Strict {
-		t.Errorf("json_schema format 매핑 실패: %+v", out.Text.Format)
+		t.Errorf("json_schema format mapping failed: %+v", out.Text.Format)
 	}
 }
 
@@ -268,7 +268,7 @@ func TestTranslateRequest_XhighOneToOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out.Reasoning == nil || out.Reasoning.Effort != "xhigh" {
-		t.Errorf("xhigh → xhigh 매핑 실패: %+v", out.Reasoning)
+		t.Errorf("xhigh → xhigh mapping failed: %+v", out.Reasoning)
 	}
 }
 
@@ -279,7 +279,7 @@ func TestTranslateRequest_InvalidEffortRejected(t *testing.T) {
 		OutputConfig: &AnthropicOutputConfig{Effort: "extreme"},
 	}
 	if _, err := TranslateRequest(req, TranslateOptions{}); err == nil {
-		t.Error("invalid effort에 에러 반환 안됨")
+		t.Error("expected error for invalid effort")
 	}
 }
 
@@ -293,6 +293,6 @@ func TestTranslateRequest_OverrideEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out.Reasoning == nil || out.Reasoning.Effort != "high" {
-		t.Errorf("override 미적용: %+v", out.Reasoning)
+		t.Errorf("override not applied: %+v", out.Reasoning)
 	}
 }

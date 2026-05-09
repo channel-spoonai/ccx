@@ -20,12 +20,12 @@ import (
 // 추출 → atomic replace → 캐시 무효화. 진행 상황은 out으로 라인 출력.
 func Apply(ctx context.Context, current string, out io.Writer) error {
 	if IsDevBuild(current) {
-		return errors.New("dev 빌드는 자동 업데이트를 지원하지 않습니다. install.sh를 다시 실행하세요")
+		return errors.New("dev builds do not support auto-update. Please run install.sh again")
 	}
 
 	target, err := resolveSelfPath()
 	if err != nil {
-		return fmt.Errorf("실행 파일 경로 확인 실패: %w", err)
+		return fmt.Errorf("failed to resolve executable path: %w", err)
 	}
 
 	rel, err := FetchLatest(ctx)
@@ -33,11 +33,11 @@ func Apply(ctx context.Context, current string, out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "[ccx] 현재 버전: v%s\n", StripV(current))
-	fmt.Fprintf(out, "[ccx] 최신 버전: %s (%s 릴리즈)\n", rel.TagName, rel.PublishedAt.Format("2006-01-02"))
+	fmt.Fprintf(out, "[ccx] Current version: v%s\n", StripV(current))
+	fmt.Fprintf(out, "[ccx] Latest version: %s (released %s)\n", rel.TagName, rel.PublishedAt.Format("2006-01-02"))
 
 	if Compare(rel.TagName, current) <= 0 {
-		fmt.Fprintf(out, "[ccx] 이미 최신 버전입니다 (%s).\n", rel.TagName)
+		fmt.Fprintf(out, "[ccx] Already on the latest version (%s).\n", rel.TagName)
 		return nil
 	}
 
@@ -45,7 +45,7 @@ func Apply(ctx context.Context, current string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("%w (OS=%s, arch=%s)", err, runtime.GOOS, runtime.GOARCH)
 	}
-	fmt.Fprintf(out, "[ccx] 다운로드 중: %s\n", filepath.Base(url))
+	fmt.Fprintf(out, "[ccx] Downloading: %s\n", filepath.Base(url))
 
 	dir := filepath.Dir(target)
 	// 같은 디렉터리(=같은 파일시스템)에 임시 파일을 만들어야 os.Rename이 atomic.
@@ -55,7 +55,7 @@ func Apply(ctx context.Context, current string, out io.Writer) error {
 
 	archive, err := os.CreateTemp(dir, "ccx-dl-*")
 	if err != nil {
-		return fmt.Errorf("임시 파일 생성 실패: %w", err)
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	archivePath := archive.Name()
 	defer os.Remove(archivePath)
@@ -70,7 +70,7 @@ func Apply(ctx context.Context, current string, out io.Writer) error {
 
 	newBin, err := os.CreateTemp(dir, "ccx-new-*")
 	if err != nil {
-		return fmt.Errorf("임시 바이너리 생성 실패: %w", err)
+		return fmt.Errorf("failed to create temp binary: %w", err)
 	}
 	newBinPath := newBin.Name()
 	defer os.Remove(newBinPath)
@@ -84,22 +84,22 @@ func Apply(ctx context.Context, current string, out io.Writer) error {
 	}
 
 	if err := os.Chmod(newBinPath, 0o755); err != nil {
-		return fmt.Errorf("권한 설정 실패: %w", err)
+		return fmt.Errorf("failed to set permissions: %w", err)
 	}
 	if runtime.GOOS == "darwin" {
 		// Gatekeeper quarantine 제거 (실패 무시 — xattr 없는 환경 대응).
 		_ = exec.CommandContext(ctx, "xattr", "-d", "com.apple.quarantine", newBinPath).Run()
 	}
 
-	fmt.Fprintf(out, "[ccx] %s 교체\n", target)
+	fmt.Fprintf(out, "[ccx] Replacing %s\n", target)
 	if err := atomicReplace(target, newBinPath); err != nil {
-		return fmt.Errorf("바이너리 교체 실패: %w", err)
+		return fmt.Errorf("failed to replace binary: %w", err)
 	}
 
 	// 다음 실행에서 새 버전이 알림 없이 바로 보이도록.
 	_ = InvalidateCache()
 
-	fmt.Fprintf(out, "[ccx] 완료. 새 버전: %s\n", rel.TagName)
+	fmt.Fprintf(out, "[ccx] Done. New version: %s\n", rel.TagName)
 	return nil
 }
 
@@ -122,7 +122,7 @@ func resolveSelfPath() (string, error) {
 func checkWritable(dir string) error {
 	probe, err := os.CreateTemp(dir, "ccx-write-test-*")
 	if err != nil {
-		return fmt.Errorf("%s 디렉터리에 쓸 권한이 없습니다 (sudo로 재실행 필요): %w", dir, err)
+		return fmt.Errorf("no write permission for directory %s (re-run with sudo): %w", dir, err)
 	}
 	probe.Close()
 	os.Remove(probe.Name())
@@ -146,7 +146,7 @@ func extractFromTarGz(archivePath string, dst io.Writer) error {
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return fmt.Errorf("gzip 디코딩 실패: %w", err)
+		return fmt.Errorf("gzip decoding failed: %w", err)
 	}
 	defer gz.Close()
 
@@ -154,10 +154,10 @@ func extractFromTarGz(archivePath string, dst io.Writer) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			return errors.New("아카이브에서 ccx 바이너리를 찾을 수 없습니다")
+			return errors.New("ccx binary not found in archive")
 		}
 		if err != nil {
-			return fmt.Errorf("tar 읽기 실패: %w", err)
+			return fmt.Errorf("tar read failed: %w", err)
 		}
 		if filepath.Base(hdr.Name) != "ccx" {
 			continue
@@ -166,7 +166,7 @@ func extractFromTarGz(archivePath string, dst io.Writer) error {
 			continue
 		}
 		if _, err := io.Copy(dst, tr); err != nil {
-			return fmt.Errorf("바이너리 추출 실패: %w", err)
+			return fmt.Errorf("failed to extract binary: %w", err)
 		}
 		return nil
 	}
@@ -175,7 +175,7 @@ func extractFromTarGz(archivePath string, dst io.Writer) error {
 func extractFromZip(archivePath string, dst io.Writer) error {
 	zr, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return fmt.Errorf("zip 열기 실패: %w", err)
+		return fmt.Errorf("failed to open zip: %w", err)
 	}
 	defer zr.Close()
 
@@ -190,9 +190,9 @@ func extractFromZip(archivePath string, dst io.Writer) error {
 		_, err = io.Copy(dst, rc)
 		rc.Close()
 		if err != nil {
-			return fmt.Errorf("바이너리 추출 실패: %w", err)
+			return fmt.Errorf("failed to extract binary: %w", err)
 		}
 		return nil
 	}
-	return errors.New("아카이브에서 ccx.exe를 찾을 수 없습니다")
+	return errors.New("ccx.exe not found in archive")
 }

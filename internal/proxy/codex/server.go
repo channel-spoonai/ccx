@@ -55,7 +55,7 @@ func Start(opts ServerOptions) (*Server, error) {
 	if listener == nil {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			return nil, fmt.Errorf("프록시 listen 실패: %w", err)
+			return nil, fmt.Errorf("proxy listen failed: %w", err)
 		}
 		listener = l
 	}
@@ -277,10 +277,10 @@ func surfaceForwardError(w http.ResponseWriter, err error) {
 			writeJSONError(w, http.StatusTooManyRequests, "rate_limit_error", "upstream rate limited: "+fe.Detail)
 			return
 		case 401:
-			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "Codex 인증 실패 — `ccx codex login` 다시 실행 필요")
+			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "Codex authentication failed — run `ccx codex login` again")
 			return
 		case 403:
-			writeJSONError(w, http.StatusForbidden, "permission_error", "Codex 접근 거부됨: "+fe.Detail)
+			writeJSONError(w, http.StatusForbidden, "permission_error", "Codex access denied: "+fe.Detail)
 			return
 		}
 		writeJSONError(w, http.StatusBadGateway, "api_error", fmt.Sprintf("upstream %d: %s", fe.Status, fe.Detail))

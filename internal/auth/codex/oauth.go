@@ -22,9 +22,9 @@ func listenCallback() (net.Listener, int, error) {
 			return l, port, nil
 		}
 	}
-	return nil, 0, fmt.Errorf("OAuth 콜백 포트 %d/%d 둘 다 점유됨. "+
-		"`lsof -iTCP:%d -sTCP:LISTEN` 으로 점유자를 확인 후 종료하거나, "+
-		"`ccx codex login --device` 로 디바이스 코드 흐름을 사용하세요",
+	return nil, 0, fmt.Errorf("OAuth callback ports %d and %d are both in use. "+
+		"Run `lsof -iTCP:%d -sTCP:LISTEN` to find and stop the process, or "+
+		"use `ccx codex login --device` for the device-code flow",
 		OAuthPrimaryPort, OAuthFallbackPort, OAuthPrimaryPort)
 }
 
@@ -65,20 +65,20 @@ func postTokenForm(ctx context.Context, form url.Values) (TokenResponse, error) 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("토큰 엔드포인트 요청 실패: %w", err)
+		return TokenResponse{}, fmt.Errorf("token endpoint request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return TokenResponse{}, fmt.Errorf("토큰 교환 실패 (%d): %s", resp.StatusCode, string(body))
+		return TokenResponse{}, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, string(body))
 	}
 	var tok TokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return TokenResponse{}, fmt.Errorf("토큰 응답 파싱 실패: %w", err)
+		return TokenResponse{}, fmt.Errorf("failed to parse token response: %w", err)
 	}
 	if tok.AccessToken == "" {
-		return TokenResponse{}, errors.New("토큰 응답에 access_token 없음")
+		return TokenResponse{}, errors.New("token response missing access_token")
 	}
 	return tok, nil
 }
@@ -122,13 +122,13 @@ func RunBrowserLogin(ctx context.Context, printURL BrowserLoginPrinter) (TokenRe
 		q := r.URL.Query()
 		if e := q.Get("error"); e != "" {
 			http.Error(w, "Auth failed: "+e, http.StatusBadRequest)
-			done <- result{err: fmt.Errorf("OAuth 거부됨: %s", e)}
+			done <- result{err: fmt.Errorf("OAuth denied: %s", e)}
 			return
 		}
 		code := q.Get("code")
 		if code == "" || q.Get("state") != state {
 			http.Error(w, "Invalid callback", http.StatusBadRequest)
-			done <- result{err: errors.New("OAuth 콜백 invalid (state 불일치 또는 code 누락)")}
+			done <- result{err: errors.New("invalid OAuth callback (state mismatch or missing code)")}
 			return
 		}
 		// 토큰 교환은 timeout이 짧아도 되도록 별도 context.
@@ -142,7 +142,7 @@ func RunBrowserLogin(ctx context.Context, printURL BrowserLoginPrinter) (TokenRe
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<!doctype html><html><body style="font-family:sans-serif;text-align:center;padding:48px">
-<h1>인증 성공</h1><p>이 창을 닫고 터미널로 돌아가세요.</p></body></html>`))
+<h1>Authentication successful</h1><p>You can close this window and return to the terminal.</p></body></html>`))
 		done <- result{tok: tok}
 	})
 
@@ -159,7 +159,7 @@ func RunBrowserLogin(ctx context.Context, printURL BrowserLoginPrinter) (TokenRe
 	if printURL != nil {
 		printURL(authURL)
 	} else {
-		fmt.Printf("\n다음 URL을 브라우저에서 열어 인증하세요:\n\n  %s\n\n", authURL)
+		fmt.Printf("\nOpen the following URL in a browser to authenticate:\n\n  %s\n\n", authURL)
 	}
 
 	timeout := time.NewTimer(5 * time.Minute)
@@ -169,7 +169,7 @@ func RunBrowserLogin(ctx context.Context, printURL BrowserLoginPrinter) (TokenRe
 	case <-ctx.Done():
 		return TokenResponse{}, ctx.Err()
 	case <-timeout.C:
-		return TokenResponse{}, errors.New("OAuth 5분 timeout")
+		return TokenResponse{}, errors.New("OAuth timed out after 5 minutes")
 	case r := <-done:
 		return r.tok, r.err
 	}

@@ -27,10 +27,10 @@ func TestAccumulateResponse_TextOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.ID != "msg_x" || got.Model != "gpt-5.4" || got.Type != "message" || got.Role != "assistant" {
-		t.Errorf("메타 필드 잘못됨: %+v", got)
+		t.Errorf("metadata fields wrong: %+v", got)
 	}
 	if len(got.Content) != 1 || got.Content[0].Type != "text" || got.Content[0].Text != "Hello world" {
-		t.Errorf("text 누적 잘못됨: %+v", got.Content)
+		t.Errorf("text accumulation wrong: %+v", got.Content)
 	}
 	if got.StopReason != StopEndTurn {
 		t.Errorf("stop reason: %s", got.StopReason)
@@ -55,10 +55,10 @@ func TestAccumulateResponse_ToolUseInputParsed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Content) != 1 || got.Content[0].Type != "tool_use" || got.Content[0].ID != "c1" || got.Content[0].Name != "Bash" {
-		t.Errorf("tool_use 매핑 잘못됨: %+v", got.Content)
+		t.Errorf("tool_use mapping wrong: %+v", got.Content)
 	}
 	if string(got.Content[0].Input) != `{"cmd":"ls"}` {
-		t.Errorf("input JSON 보존 실패: %s", got.Content[0].Input)
+		t.Errorf("failed to preserve input JSON: %s", got.Content[0].Input)
 	}
 	if got.StopReason != StopToolUse {
 		t.Errorf("stop_reason: %s, want tool_use", got.StopReason)
@@ -73,7 +73,7 @@ func TestAccumulateResponse_RateLimitErrorPropagated(t *testing.T) {
 	_, err := AccumulateResponse(strings.NewReader(stream), AccumulateOptions{})
 	var up *UpstreamError
 	if !errors.As(err, &up) || up.Kind != ErrorRateLimit {
-		t.Errorf("rate_limit이 그대로 전파되어야 함: %v", err)
+		t.Errorf("rate_limit should propagate as-is: %v", err)
 	}
 }
 
@@ -87,6 +87,6 @@ func TestAccumulateResponse_DiscardsEmptyText(t *testing.T) {
 	)
 	got, _ := AccumulateResponse(strings.NewReader(stream), AccumulateOptions{})
 	if len(got.Content) != 0 {
-		t.Errorf("빈 text 블록은 응답에서 제외되어야 함: %+v", got.Content)
+		t.Errorf("empty text blocks should be excluded from response: %+v", got.Content)
 	}
 }

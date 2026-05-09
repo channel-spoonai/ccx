@@ -137,7 +137,7 @@ func Load() (*Loaded, error) {
 	path := DefaultPath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if from, ok := tryMigrateLegacy(path); ok {
-			fmt.Fprintf(os.Stderr, "[ccx] 설정 파일을 %s → %s 로 이동했습니다.\n", from, path)
+			fmt.Fprintf(os.Stderr, "[ccx] Moved config file from %s → %s\n", from, path)
 		} else {
 			return &Loaded{Path: path, Missing: true}, nil
 		}
@@ -145,17 +145,17 @@ func Load() (*Loaded, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("설정 파일 읽기 오류: %w", err)
+		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("설정 파일 파싱 오류: %w", err)
+		return nil, fmt.Errorf("error parsing config file: %w", err)
 	}
 
 	for i, p := range cfg.Profiles {
 		if p.Name == "" {
-			return nil, fmt.Errorf("프로파일 #%d에 \"name\" 필드가 없습니다", i+1)
+			return nil, fmt.Errorf("profile #%d is missing the \"name\" field", i+1)
 		}
 	}
 

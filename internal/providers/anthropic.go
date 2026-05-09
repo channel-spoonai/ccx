@@ -30,7 +30,7 @@ type AnthropicModelsResult struct {
 // the function tries {baseURL}/v1/models first, then a stripped root.
 func FetchAnthropicModels(p *config.Profile) AnthropicModelsResult {
 	if p == nil || p.BaseURL == "" {
-		return AnthropicModelsResult{Err: errors.New("baseURL이 비어 있습니다")}
+		return AnthropicModelsResult{Err: errors.New("baseURL is empty")}
 	}
 	urls := candidateModelURLs(p.BaseURL)
 	var lastErr error
@@ -46,7 +46,7 @@ func FetchAnthropicModels(p *config.Profile) AnthropicModelsResult {
 		}
 	}
 	if lastErr == nil {
-		lastErr = errors.New("모델 목록이 비어 있습니다")
+		lastErr = errors.New("model list is empty")
 	}
 	return AnthropicModelsResult{URL: lastURL, Err: lastErr}
 }

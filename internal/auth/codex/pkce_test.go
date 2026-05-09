@@ -14,13 +14,13 @@ func TestGeneratePKCE_VerifierAndChallengeMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(pkce.Verifier) < 43 || len(pkce.Verifier) > 128 {
-		t.Fatalf("verifier 길이 RFC 7636 범위 벗어남: %d", len(pkce.Verifier))
+		t.Fatalf("verifier length out of RFC 7636 range: %d", len(pkce.Verifier))
 	}
 	// challenge는 SHA-256(verifier)의 base64url.
 	sum := sha256.Sum256([]byte(pkce.Verifier))
 	want := base64.RawURLEncoding.EncodeToString(sum[:])
 	if pkce.Challenge != want {
-		t.Fatalf("challenge가 SHA-256(verifier)와 다름")
+		t.Fatalf("challenge does not match SHA-256(verifier)")
 	}
 }
 
@@ -30,10 +30,10 @@ func TestGeneratePKCE_NoPadding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.ContainsAny(pkce.Verifier, "=+/") {
-		t.Errorf("verifier에 base64url 외 문자 포함: %q", pkce.Verifier)
+		t.Errorf("verifier contains non-base64url characters: %q", pkce.Verifier)
 	}
 	if strings.ContainsAny(pkce.Challenge, "=+/") {
-		t.Errorf("challenge에 base64url 외 문자 포함: %q", pkce.Challenge)
+		t.Errorf("challenge contains non-base64url characters: %q", pkce.Challenge)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestGeneratePKCE_Unique(t *testing.T) {
 	a, _ := GeneratePKCE()
 	b, _ := GeneratePKCE()
 	if a.Verifier == b.Verifier {
-		t.Fatal("연속 호출이 같은 verifier 생성")
+		t.Fatal("consecutive calls produced the same verifier")
 	}
 }
 
@@ -73,7 +73,7 @@ func TestBuildAuthorizeURL_AllRequiredParams(t *testing.T) {
 		}
 	}
 	if !strings.HasPrefix(u, Issuer+"/oauth/authorize?") {
-		t.Errorf("authorize URL이 issuer로 시작하지 않음: %s", u)
+		t.Errorf("authorize URL does not start with issuer: %s", u)
 	}
 }
 
@@ -81,9 +81,9 @@ func TestGenerateState_Unique(t *testing.T) {
 	a, _ := GenerateState()
 	b, _ := GenerateState()
 	if a == b {
-		t.Fatal("연속 state가 동일")
+		t.Fatal("consecutive states are identical")
 	}
 	if len(a) < 43 {
-		t.Errorf("state 길이 너무 짧음: %d", len(a))
+		t.Errorf("state length too short: %d", len(a))
 	}
 }

@@ -29,12 +29,12 @@ var validCodexEfforts = map[string]struct{}{"none": {}, "low": {}, "medium": {},
 func TranslateRequest(req *AnthropicRequest, opts TranslateOptions) (*ResponsesRequest, error) {
 	instructions, err := buildInstructions(req.System)
 	if err != nil {
-		return nil, fmt.Errorf("system 변환 실패: %w", err)
+		return nil, fmt.Errorf("system translation failed: %w", err)
 	}
 
 	input, err := buildInput(req.Messages)
 	if err != nil {
-		return nil, fmt.Errorf("messages 변환 실패: %w", err)
+		return nil, fmt.Errorf("messages translation failed: %w", err)
 	}
 
 	var tools []ResponsesTool
@@ -113,7 +113,7 @@ func TranslateRequest(req *AnthropicRequest, opts TranslateOptions) (*ResponsesR
 func resolveEffort(anthropicEffort, override string) (string, error) {
 	if anthropicEffort != "" {
 		if _, ok := validAnthropicEfforts[anthropicEffort]; !ok {
-			return "", fmt.Errorf(`output_config.effort 값이 잘못됨: %q (허용: low/medium/high/xhigh/max)`, anthropicEffort)
+			return "", fmt.Errorf(`invalid output_config.effort value: %q (allowed: low/medium/high/xhigh/max)`, anthropicEffort)
 		}
 	}
 	codexEffort := anthropicEffort
@@ -123,7 +123,7 @@ func resolveEffort(anthropicEffort, override string) (string, error) {
 	}
 	if override != "" {
 		if _, ok := validCodexEfforts[override]; !ok {
-			return "", fmt.Errorf(`effort override 값이 잘못됨: %q (허용: none/low/medium/high/xhigh)`, override)
+			return "", fmt.Errorf(`invalid effort override value: %q (allowed: none/low/medium/high/xhigh)`, override)
 		}
 		codexEffort = override
 	}
@@ -147,7 +147,7 @@ func mapToolChoice(c *AnthropicToolChoice) (json.RawMessage, error) {
 		}
 		return json.RawMessage(`"required"`), nil
 	default:
-		return nil, fmt.Errorf("알 수 없는 tool_choice.type: %q", c.Type)
+		return nil, fmt.Errorf("unknown tool_choice.type: %q", c.Type)
 	}
 }
 
@@ -169,7 +169,7 @@ func buildInstructions(raw json.RawMessage) (string, error) {
 	// 또는 []AnthropicBlock 형태.
 	var blocks []AnthropicBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", fmt.Errorf("system 형식 인식 실패: %w", err)
+		return "", fmt.Errorf("failed to recognize system format: %w", err)
 	}
 	var parts []string
 	for _, b := range blocks {
@@ -195,7 +195,7 @@ func normalizeContent(raw json.RawMessage) ([]AnthropicBlock, error) {
 	}
 	var blocks []AnthropicBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return nil, fmt.Errorf("content 형식 인식 실패: %w", err)
+		return nil, fmt.Errorf("failed to recognize content format: %w", err)
 	}
 	return blocks, nil
 }
@@ -223,7 +223,7 @@ func toolResultToString(raw json.RawMessage) (string, error) {
 	}
 	var blocks []AnthropicBlock
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return "", fmt.Errorf("tool_result.content 인식 실패: %w", err)
+		return "", fmt.Errorf("failed to recognize tool_result.content: %w", err)
 	}
 	var parts []string
 	for _, b := range blocks {

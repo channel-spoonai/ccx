@@ -25,17 +25,17 @@ func prepareCodexOAuth(p *config.Profile) (*config.Profile, error) {
 	//    여기서는 단순히 파일 존재만 본다.
 	stored, err := codexauth.LoadAuth()
 	if err != nil {
-		return nil, fmt.Errorf("Codex 토큰 파일 읽기 실패: %w", err)
+		return nil, fmt.Errorf("failed to read Codex token file: %w", err)
 	}
 	if stored == nil {
-		return nil, errors.New("Codex OAuth 인증이 필요합니다 — `ccx codex login` 을 먼저 실행하세요")
+		return nil, errors.New("Codex OAuth authentication required — run `ccx codex login` first")
 	}
 
 	// 2) 자식 프록시 데몬 spawn. 부모가 syscall.Exec(claude)로 사라져도 자식은 ppid polling으로
 	//    claude 종료를 감지해 자체 종료한다.
 	sd, err := proxy.SpawnDaemon(5 * time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("Codex 프록시 spawn 실패: %w", err)
+		return nil, fmt.Errorf("failed to spawn Codex proxy: %w", err)
 	}
 
 	// 3) profile copy: BaseURL/AuthToken 만 자동 주입하고 나머지는 그대로 둔다.
@@ -49,8 +49,8 @@ func prepareCodexOAuth(p *config.Profile) (*config.Profile, error) {
 
 // banner 정보 출력용 — Launch에서 호출 후 syscall.Exec 직전.
 func printCodexOAuthBanner(addr, accountID string) {
-	fmt.Printf("\x1B[36m[ccx]\x1B[0m Codex OAuth 프록시: %s\n", addr)
+	fmt.Printf("\x1B[36m[ccx]\x1B[0m Codex OAuth proxy: %s\n", addr)
 	if accountID != "" {
-		fmt.Printf("\x1B[36m[ccx]\x1B[0m ChatGPT 계정: %s\n", accountID)
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m ChatGPT account: %s\n", accountID)
 	}
 }

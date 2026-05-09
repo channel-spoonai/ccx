@@ -77,7 +77,7 @@ func Forward(
 		_ = resp.Body.Close()
 		auth2, refErr := mgr.ForceRefresh(ctx)
 		if refErr != nil {
-			return nil, fmt.Errorf("401 후 refresh 실패: %w", refErr)
+			return nil, fmt.Errorf("token refresh after 401 failed: %w", refErr)
 		}
 		resp, err = doForward(ctx, auth2, body, opts)
 		if err != nil {
@@ -108,7 +108,7 @@ func doForward(
 ) (*http.Response, error) {
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("요청 직렬화 실패: %w", err)
+		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", auth.CodexAPIEndpoint, bytes.NewReader(buf))
 	if err != nil {
@@ -141,7 +141,7 @@ func doForward(
 
 	resp, err := upstreamClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Codex API 요청 실패: %w", err)
+		return nil, fmt.Errorf("Codex API request failed: %w", err)
 	}
 	if debugEnabled() {
 		fmt.Fprintf(os.Stderr, "[ccx codex-proxy] upstream status=%d\n", resp.StatusCode)

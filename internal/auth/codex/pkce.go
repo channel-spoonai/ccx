@@ -19,7 +19,7 @@ type PKCECodes struct {
 func GeneratePKCE() (PKCECodes, error) {
 	verifier, err := randomBase64URL(pkceVerifierBytes)
 	if err != nil {
-		return PKCECodes{}, fmt.Errorf("PKCE verifier 생성 실패: %w", err)
+		return PKCECodes{}, fmt.Errorf("failed to generate PKCE verifier: %w", err)
 	}
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
@@ -30,7 +30,7 @@ func GeneratePKCE() (PKCECodes, error) {
 func GenerateState() (string, error) {
 	s, err := randomBase64URL(stateBytes)
 	if err != nil {
-		return "", fmt.Errorf("state 생성 실패: %w", err)
+		return "", fmt.Errorf("failed to generate state: %w", err)
 	}
 	return s, nil
 }

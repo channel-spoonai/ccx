@@ -43,7 +43,7 @@ func (s *SpawnedDaemon) Address() string {
 func SpawnDaemon(readyTimeout time.Duration) (*SpawnedDaemon, error) {
 	self, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("self path 조회 실패: %w", err)
+		return nil, fmt.Errorf("failed to look up self path: %w", err)
 	}
 	secret, err := newSharedSecret()
 	if err != nil {
@@ -59,11 +59,11 @@ func SpawnDaemon(readyTimeout time.Duration) (*SpawnedDaemon, error) {
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe 생성 실패: %w", err)
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("자식 프록시 spawn 실패: %w", err)
+		return nil, fmt.Errorf("failed to spawn child proxy: %w", err)
 	}
 
 	// "ready PORT\n" 한 줄을 timeout 안에 받는다.
@@ -99,19 +99,19 @@ func readReady(r interface{ Read(p []byte) (int, error) }, timeout time.Duration
 		br := bufio.NewReader(r)
 		line, err := br.ReadString('\n')
 		if err != nil {
-			done <- result{err: fmt.Errorf("자식 ready 출력 읽기 실패: %w", err)}
+			done <- result{err: fmt.Errorf("failed to read child ready output: %w", err)}
 			return
 		}
 		line = strings.TrimSpace(line)
 		// 형식: "ready <port>"
 		parts := strings.Fields(line)
 		if len(parts) != 2 || parts[0] != "ready" {
-			done <- result{err: fmt.Errorf("자식 ready 메시지 형식 오류: %q", line)}
+			done <- result{err: fmt.Errorf("malformed child ready message: %q", line)}
 			return
 		}
 		port, err := strconv.Atoi(parts[1])
 		if err != nil || port <= 0 {
-			done <- result{err: fmt.Errorf("자식 ready 포트 파싱 실패: %q", line)}
+			done <- result{err: fmt.Errorf("failed to parse child ready port: %q", line)}
 			return
 		}
 		done <- result{port: port}
@@ -123,7 +123,7 @@ func readReady(r interface{ Read(p []byte) (int, error) }, timeout time.Duration
 	case r := <-done:
 		return r.port, r.err
 	case <-t.C:
-		return 0, errors.New("자식 프록시가 timeout 안에 ready 신호를 보내지 않음")
+		return 0, errors.New("child proxy did not signal ready within timeout")
 	}
 }
 

@@ -42,7 +42,7 @@ func TestParseSSE_MultilineData(t *testing.T) {
 		return true
 	})
 	if len(got) != 1 || got[0].Data != "line1\nline2" {
-		t.Errorf("multi-line data가 \\n으로 join되어야 함: %+v", got)
+		t.Errorf("multi-line data should be joined with \\n: %+v", got)
 	}
 }
 
@@ -54,7 +54,7 @@ func TestParseSSE_CommentLineSkipped(t *testing.T) {
 		return true
 	})
 	if len(got) != 1 || got[0].Event != "keep" {
-		t.Errorf("comment 처리 문제: %+v", got)
+		t.Errorf("comment handling issue: %+v", got)
 	}
 }
 
@@ -67,7 +67,7 @@ func TestParseSSE_TrailingPartialEventEmitted(t *testing.T) {
 		return true
 	})
 	if len(got) != 1 || got[0].Event != "tail" {
-		t.Errorf("trailing 이벤트 누락: %+v", got)
+		t.Errorf("trailing event missing: %+v", got)
 	}
 }
 
@@ -78,12 +78,12 @@ func TestEncodeSSE_Format(t *testing.T) {
 	}
 	got := string(out)
 	if !strings.HasPrefix(got, "event: ping\n") {
-		t.Errorf("prefix 잘못됨: %q", got)
+		t.Errorf("prefix wrong: %q", got)
 	}
 	if !strings.Contains(got, `data: {"hello":"world"}`) {
-		t.Errorf("data 라인 잘못됨: %q", got)
+		t.Errorf("data line wrong: %q", got)
 	}
 	if !strings.HasSuffix(got, "\n\n") {
-		t.Errorf("\\n\\n 종결 누락: %q", got)
+		t.Errorf("\\n\\n termination missing: %q", got)
 	}
 }

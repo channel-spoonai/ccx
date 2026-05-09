@@ -59,12 +59,12 @@ func TestExtractAccountID_NoClaims(t *testing.T) {
 
 func TestParseJWTClaims_HandlesMalformed(t *testing.T) {
 	if _, ok := parseJWTClaims(""); ok {
-		t.Error("empty 토큰이 ok=true 반환")
+		t.Error("empty token returned ok=true")
 	}
 	if _, ok := parseJWTClaims("only.two"); ok {
-		t.Error("부분 segment 토큰이 ok=true 반환")
+		t.Error("token with missing segments returned ok=true")
 	}
 	if _, ok := parseJWTClaims("a.!!notbase64!!.c"); ok {
-		t.Error("invalid base64가 ok=true 반환")
+		t.Error("invalid base64 returned ok=true")
 	}
 }

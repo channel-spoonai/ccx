@@ -12,10 +12,10 @@ func TestPrepareCodexOAuth_FailsWithoutToken(t *testing.T) {
 
 	_, err := prepareCodexOAuth(&config.Profile{Name: "x", Auth: AuthCodexOAuth})
 	if err == nil {
-		t.Fatal("토큰 없을 때 에러여야 함")
+		t.Fatal("expected error when token is missing")
 	}
 	if !strings.Contains(err.Error(), "ccx codex login") {
-		t.Errorf("에러 메시지에 사용자 안내가 포함되어야 함: %v", err)
+		t.Errorf("error message should include user guidance: %v", err)
 	}
 }
 

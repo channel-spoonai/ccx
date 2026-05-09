@@ -89,14 +89,14 @@ func replaceOrAppend(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
-var errClaudeNotFound = errors.New(`"claude"를 찾을 수 없습니다. Claude Code가 설치되어 있나요? https://docs.anthropic.com/en/docs/claude-code`)
+var errClaudeNotFound = errors.New(`"claude" not found. Is Claude Code installed? https://docs.anthropic.com/en/docs/claude-code`)
 
 func ErrClaudeNotFound() error { return errClaudeNotFound }
 
 func printBanner(p *config.Profile) {
-	fmt.Printf("\x1B[36m[ccx]\x1B[0m 프로파일: \x1B[1m%s\x1B[0m\n", p.Name)
+	fmt.Printf("\x1B[36m[ccx]\x1B[0m Profile: \x1B[1m%s\x1B[0m\n", p.Name)
 	if missing := unresolvedEnvRefs(p); len(missing) > 0 {
-		fmt.Printf("\x1B[33m[ccx]\x1B[0m ⚠ 환경변수 미설정: %s\n", strings.Join(missing, ", "))
+		fmt.Printf("\x1B[33m[ccx]\x1B[0m ⚠ unset environment variables: %s\n", strings.Join(missing, ", "))
 	}
 	if p.BaseURL != "" {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m API: %s\n", p.BaseURL)
@@ -113,7 +113,7 @@ func printBanner(p *config.Profile) {
 			parts = append(parts, "haiku→"+p.Models.Haiku)
 		}
 		if len(parts) > 0 {
-			fmt.Printf("\x1B[36m[ccx]\x1B[0m 모델: %s\n", strings.Join(parts, ", "))
+			fmt.Printf("\x1B[36m[ccx]\x1B[0m Models: %s\n", strings.Join(parts, ", "))
 		}
 	}
 	fmt.Println()

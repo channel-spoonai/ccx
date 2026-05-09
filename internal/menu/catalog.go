@@ -6,7 +6,7 @@ import (
 )
 
 // CatalogItem is a selectable row in a searchable list. Pinned items are always
-// shown regardless of the filter query (used for "기타 (직접 입력)" / "(이 티어는 설정하지 않음)").
+// shown regardless of the filter query (used for "Other (manual entry)" / "(do not configure this tier)").
 type CatalogItem struct {
 	Label       string
 	Description string
@@ -18,7 +18,7 @@ type CatalogItem struct {
 // payload or nil if the user pressed Esc. Requires raw mode capable TTY.
 func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, error) {
 	if !IsTTY() {
-		return nil, fmt.Errorf("인터랙티브 모드에는 TTY가 필요합니다")
+		return nil, fmt.Errorf("interactive mode requires a TTY")
 	}
 	if pageSize <= 0 {
 		pageSize = 10
@@ -104,13 +104,13 @@ func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, er
 		}
 		placeholder := ""
 		if len(query) == 0 {
-			placeholder = "\x1B[90m타이핑하여 검색\x1B[0m"
+			placeholder = "\x1B[90mType to search\x1B[0m"
 		}
-		fmt.Printf("  \x1B[36m검색:\x1B[0m \x1B[1m%s\x1B[0m\x1B[7m \x1B[0m%s%s\r\n", string(query), placeholder, counter)
+		fmt.Printf("  \x1B[36mSearch:\x1B[0m \x1B[1m%s\x1B[0m\x1B[7m \x1B[0m%s%s\r\n", string(query), placeholder, counter)
 		fmt.Print("  \x1B[90m" + strings.Repeat("─", 56) + "\x1B[0m\r\n\r\n")
 
 		if len(visible) == 0 {
-			fmt.Print("   \x1B[90m(일치하는 항목 없음)\x1B[0m\r\n")
+			fmt.Print("   \x1B[90m(no matches)\x1B[0m\r\n")
 		} else {
 			clampScroll(len(visible))
 			windowEnd := scrollOffset + pageSize
@@ -121,7 +121,7 @@ func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, er
 			hasBelow := windowEnd < len(visible)
 
 			if hasAbove {
-				fmt.Printf("   \x1B[90m▲ %d개 위\x1B[0m\r\n", scrollOffset)
+				fmt.Printf("   \x1B[90m▲ %d above\x1B[0m\r\n", scrollOffset)
 			} else {
 				fmt.Print("\r\n")
 			}
@@ -148,13 +148,13 @@ func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, er
 				fmt.Printf("   %s %s%s\r\n", cursor, label, desc)
 			}
 			if hasBelow {
-				fmt.Printf("   \x1B[90m▼ %d개 아래\x1B[0m\r\n", len(visible)-windowEnd)
+				fmt.Printf("   \x1B[90m▼ %d below\x1B[0m\r\n", len(visible)-windowEnd)
 			} else {
 				fmt.Print("\r\n")
 			}
 		}
 
-		fmt.Print("\r\n  \x1B[90m 문자 입력: 검색  ↑↓: 이동  Enter: 선택  Backspace: 지우기  Esc: 취소\x1B[0m\r\n\r\n")
+		fmt.Print("\r\n  \x1B[90m type: search  ↑↓: move  Enter: select  Backspace: erase  Esc: cancel\x1B[0m\r\n\r\n")
 	}
 
 	render()
@@ -169,7 +169,7 @@ func SelectFromCatalog(items []CatalogItem, title string, pageSize int) (any, er
 		case "ctrl-c":
 			ExitAltScreen()
 			restore()
-			fmt.Println("취소되었습니다.")
+			fmt.Println("Canceled.")
 			return nil, fmt.Errorf("cancelled")
 		case "esc":
 			return nil, nil

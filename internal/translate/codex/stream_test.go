@@ -42,7 +42,7 @@ func TestTranslateStream_TextProducesAnthropicSSE(t *testing.T) {
 	}
 	for _, w := range wantContains {
 		if !strings.Contains(got, w) {
-			t.Errorf("출력에 누락: %q\n전체:\n%s", w, got)
+			t.Errorf("output missing: %q\nfull:\n%s", w, got)
 		}
 	}
 }
@@ -61,13 +61,13 @@ func TestTranslateStream_ToolUseProducesInputJsonDelta(t *testing.T) {
 	_ = TranslateStream(strings.NewReader(upstream), &out, StreamOptions{MessageID: "m", Model: "x"}, nil)
 	got := out.String()
 	if !strings.Contains(got, `"type":"tool_use"`) || !strings.Contains(got, `"id":"c1"`) {
-		t.Errorf("tool_use content_block_start 누락:\n%s", got)
+		t.Errorf("tool_use content_block_start missing:\n%s", got)
 	}
 	if !strings.Contains(got, `"type":"input_json_delta"`) {
-		t.Errorf("input_json_delta 누락:\n%s", got)
+		t.Errorf("input_json_delta missing:\n%s", got)
 	}
 	if !strings.Contains(got, `"stop_reason":"tool_use"`) {
-		t.Errorf("stop_reason=tool_use 누락:\n%s", got)
+		t.Errorf("stop_reason=tool_use missing:\n%s", got)
 	}
 }
 
@@ -82,10 +82,10 @@ func TestTranslateStream_RateLimitEmitsErrorEvent(t *testing.T) {
 	}
 	got := out.String()
 	if !strings.Contains(got, `event: error`) {
-		t.Errorf("error 이벤트 누락:\n%s", got)
+		t.Errorf("error event missing:\n%s", got)
 	}
 	if !strings.Contains(got, `"rate_limit_error"`) {
-		t.Errorf("rate_limit_error type 누락:\n%s", got)
+		t.Errorf("rate_limit_error type missing:\n%s", got)
 	}
 }
 
@@ -111,9 +111,9 @@ func TestTranslateStream_OnFinishCalled(t *testing.T) {
 		}
 	})
 	if !called {
-		t.Fatal("onFinish 호출 안됨")
+		t.Fatal("onFinish was not called")
 	}
 	if gotStop != StopEndTurn || gotInTokens != 7 {
-		t.Errorf("onFinish 인자: stop=%s in=%d", gotStop, gotInTokens)
+		t.Errorf("onFinish args: stop=%s in=%d", gotStop, gotInTokens)
 	}
 }

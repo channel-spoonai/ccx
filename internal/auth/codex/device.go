@@ -49,7 +49,7 @@ func RunDeviceLogin(ctx context.Context, prompt DevicePrompter) (TokenResponse, 
 	if prompt != nil {
 		prompt(verificationURL, init.UserCode)
 	} else {
-		fmt.Printf("\n브라우저에서 %s 를 열고 코드를 입력하세요: %s\n\n", verificationURL, init.UserCode)
+		fmt.Printf("\nOpen %s in a browser and enter code: %s\n\n", verificationURL, init.UserCode)
 	}
 
 	for {
@@ -69,7 +69,7 @@ func RunDeviceLogin(ctx context.Context, prompt DevicePrompter) (TokenResponse, 
 		// 403/404는 "아직 인증 안됨" — 계속 폴링.
 		// 그 외 상태는 즉시 실패.
 		if status != http.StatusForbidden && status != http.StatusNotFound {
-			return TokenResponse{}, fmt.Errorf("디바이스 폴링 실패: status %d", status)
+			return TokenResponse{}, fmt.Errorf("device poll failed: status %d", status)
 		}
 		select {
 		case <-ctx.Done():
@@ -88,19 +88,19 @@ func initDevice(ctx context.Context) (*deviceInitResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("디바이스 초기화 요청 실패: %w", err)
+		return nil, fmt.Errorf("device init request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("디바이스 초기화 실패 (%d): %s", resp.StatusCode, string(raw))
+		return nil, fmt.Errorf("device init failed (%d): %s", resp.StatusCode, string(raw))
 	}
 	var init deviceInitResponse
 	if err := json.Unmarshal(raw, &init); err != nil {
-		return nil, fmt.Errorf("디바이스 초기화 응답 파싱 실패: %w", err)
+		return nil, fmt.Errorf("failed to parse device init response: %w", err)
 	}
 	if init.DeviceAuthID == "" || init.UserCode == "" {
-		return nil, fmt.Errorf("디바이스 초기화 응답이 비어있음")
+		return nil, fmt.Errorf("device init response is empty")
 	}
 	return &init, nil
 }
@@ -117,7 +117,7 @@ func pollDevice(ctx context.Context, deviceAuthID, userCode string) (*devicePoll
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("디바이스 폴링 요청 실패: %w", err)
+		return nil, 0, fmt.Errorf("device poll request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -126,7 +126,7 @@ func pollDevice(ctx context.Context, deviceAuthID, userCode string) (*devicePoll
 	}
 	var poll devicePollResponse
 	if err := json.Unmarshal(raw, &poll); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("디바이스 폴링 응답 파싱 실패: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("failed to parse device poll response: %w", err)
 	}
 	return &poll, resp.StatusCode, nil
 }
