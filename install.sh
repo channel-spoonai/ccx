@@ -83,6 +83,14 @@ if [[ "$OS" == "darwin" ]] && command -v xattr >/dev/null 2>&1; then
   xattr -d com.apple.quarantine "$TARGET" 2>/dev/null || true
 fi
 
+# Re-sign locally on macOS — the goreleaser archive ships an adhoc-signed
+# binary that, when downloaded via curl, gets a com.apple.provenance attribute
+# (not removable by xattr) which makes Gatekeeper SIGKILL the process. A
+# fresh local adhoc signature replaces the provenance-tied one.
+if [[ "$OS" == "darwin" ]] && command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "$TARGET" >/dev/null 2>&1 || true
+fi
+
 echo ""
 echo "✓ installed ccx $VERSION at: $TARGET"
 
