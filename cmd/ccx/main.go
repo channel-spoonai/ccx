@@ -52,7 +52,8 @@ func parseArgs(argv []string) parsedArgs {
 }
 
 func main() {
-	// 이전 `ccx update` 사이클이 남긴 .old 바이너리 잔재를 청소 (Windows 전용 no-op on Unix).
+	// 이전 업데이트 사이클의 잔재 청소: .old-* 바이너리(Windows)와
+	// 중단된 다운로드 임시파일 ccx-dl-*/ccx-new-* (전 플랫폼, mtime 1h 초과분만).
 	update.CleanupStaleBinary()
 
 	// Hidden 서브명령: 자식 데몬 모드. 부모 ccx가 SpawnDaemon으로 자기 자신을 재호출할 때 진입.
@@ -83,6 +84,17 @@ func main() {
 	// 24h에 한 번만 GitHub API 호출. 캐시 hit이면 즉시 노출, miss면 백그라운드 fetch만.
 	updateNotice := update.MaybeNotify(version)
 
+	// 캐시가 새 버전을 알고 있으면 알림 대신 자동 적용을 시도한다 (CCX_AUTO_UPDATE=0으로 opt-out).
+	// 실패해도 launch는 계속 — updateNotice가 기존 알림 경로로 폴백.
+	// 서브커맨드/데몬 경로는 위에서 이미 return했으므로 여기 도달하지 않는다.
+	if updateNotice != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), update.AutoApplyTimeout)
+		if update.TryAutoUpdate(ctx, version, updateNotice, os.Stderr) {
+			updateNotice = ""
+		}
+		cancel()
+	}
+
 	loaded, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -110,6 +122,9 @@ func main() {
 		if updateNotice != "" {
 			fmt.Fprintf(os.Stderr, "[ccx] New version %s available — run `ccx update`\n", updateNotice)
 		}
+		// Unix launch는 syscall.Exec로 프로세스를 교체하므로, 진행 중인 백그라운드
+		// 버전 체크가 캐시를 쓸 때까지 잠깐 기다린다 (미시작/완료면 즉시 통과).
+		update.WaitBackgroundFetch(2 * time.Second)
 		if err := launcher.Launch(profile, args.claudeArgs); err != nil {
 			if errors.Is(err, launcher.ErrClaudeNotFound()) {
 				fmt.Fprintln(os.Stderr, "Error:", err)
@@ -296,6 +311,9 @@ func runInteractive(loaded *config.Loaded, claudeArgs []string, updateNotice str
 		switch action.Kind {
 		case menu.ActionLaunch:
 			menu.ExitAltScreen()
+			// syscall.Exec 전에 백그라운드 버전 체크의 캐시 쓰기를 보장 (메뉴 체류 중
+			// 대부분 이미 완료돼 즉시 통과).
+			update.WaitBackgroundFetch(2 * time.Second)
 			if err := launcher.Launch(action.Profile, claudeArgs); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)
 				os.Exit(1)
