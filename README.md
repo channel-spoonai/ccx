@@ -98,16 +98,18 @@ Route Claude Code through your ChatGPT Plus/Pro/Business subscription. One-time 
 
 ```bash
 ccx codex login                  # browser OAuth (headless: --device)
-ccx -xSet "ChatGPT (Codex)"      # use after authentication
+ccx -xSet "Codex"                # use after authentication
 ```
 
 Model mapping (Claude Code tier → Codex model):
 
 | Claude Code | Codex |
 |---|---|
-| opus   | gpt-5.5 |
-| sonnet | gpt-5.4 |
-| haiku  | gpt-5.4-mini |
+| opus   | gpt-5.6-sol |
+| sonnet | gpt-5.6-terra |
+| haiku  | gpt-5.6-luna |
+
+Older IDs (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`) remain valid. `gpt-5.6-sol` may be unavailable on some ChatGPT plans — switch that slot to `gpt-5.6-terra` if rejected. GPT-5.6 subscriptions have a 272K context window, so the profile ships with `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`.
 
 Status / logout: `ccx codex status` / `ccx codex logout`
 

@@ -110,16 +110,18 @@ ChatGPT Plus/Pro/Business 구독으로 Claude Code를 돌립니다. 사용 전 O
 
 ```bash
 ccx codex login                  # 브라우저로 ChatGPT 인증 (헤드리스: --device)
-ccx -xSet "ChatGPT (Codex)"      # 인증 후 사용
+ccx -xSet "Codex"                # 인증 후 사용
 ```
 
 모델 매핑 (Claude Code 티어 → Codex 모델):
 
 | Claude Code | Codex |
 |---|---|
-| opus   | gpt-5.5 |
-| sonnet | gpt-5.4 |
-| haiku  | gpt-5.4-mini |
+| opus   | gpt-5.6-sol |
+| sonnet | gpt-5.6-terra |
+| haiku  | gpt-5.6-luna |
+
+구형 ID(`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`)도 계속 유효합니다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있으니 그 경우 해당 슬롯을 `gpt-5.6-terra`로 바꾸세요. GPT-5.6 구독의 컨텍스트 창은 272K라서 프로파일에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`이 기본 포함됩니다.
 
 상태/로그아웃: `ccx codex status` / `ccx codex logout`
 

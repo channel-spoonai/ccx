@@ -103,10 +103,12 @@ ccx codex login                  # 브라우저 PKCE 플로우
 ccx codex login --device         # 헤드리스/SSH 환경용 디바이스 코드 플로우
 ccx codex status                 # 현재 인증 상태
 ccx codex logout                 # 토큰 삭제
-ccx -xSet "ChatGPT (Codex)"      # 라우팅 시작
+ccx -xSet "Codex"                # 라우팅 시작
 ```
 
 프로파일은 `auth: "codex-oauth"` 디스크리미네이터만 두고 baseUrl/authToken은 비워둔다 — ccx가 자동으로 로컬 프록시(랜덤 포트)를 띄우고 채워준다.
+
+모델 ID는 프록시에서 `[1m]`/`[200k]` 컨텍스트 suffix만 제거하고 그대로 업스트림에 패스스루된다 — 허용 목록이 없어 새 모델은 config 갱신만으로 사용 가능. 카탈로그 기본값은 GPT-5.6 패밀리(opus→`gpt-5.6-sol`, sonnet→`gpt-5.6-terra`, haiku→`gpt-5.6-luna`). ChatGPT 구독의 GPT-5.6 컨텍스트 창은 272K라 카탈로그 프로파일 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`을 포함한다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있음(그 경우 `gpt-5.6-terra`로 대체).
 
 **아키텍처**:
 - `internal/auth/codex/` — PKCE/디바이스 코드 OAuth 클라이언트, 토큰 저장(`~/.config/ccx/auth/codex.json` mode 0600), 자동 refresh
