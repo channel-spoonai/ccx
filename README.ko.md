@@ -28,13 +28,13 @@ irm https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.ps1 | iex
 
 ### 업데이트
 
-이미 설치된 ccx는 다음 명령으로 최신 릴리즈로 갱신합니다.
+ccx는 스스로 최신 상태를 유지합니다: 하루에 한 번 GitHub에서 새 릴리즈를 확인하고(캐시는 `~/.config/ccx/update-check.json`), 새 버전이 발견되면 다음 실행 시작 시(프로파일 메뉴 전에) 자동으로 적용합니다 — 새 버전은 그다음 실행부터 반영됩니다. 끄려면 `CCX_AUTO_UPDATE=0`을 설정하세요. 스크립트/비-TTY 실행과 쓰기 권한이 없는 설치 위치에서는 자동 적용 대신 한 줄 알림만 표시되고, dev 빌드(소스 빌드)는 업데이트 체크 자체를 하지 않습니다.
+
+수동으로 즉시 업데이트하려면 언제든:
 
 ```bash
 ccx update
 ```
-
-ccx는 하루에 한 번 GitHub에서 새 릴리즈가 있는지 확인해, 새 버전이 나오면 메뉴 헤더에 한 줄로 안내합니다 (캐시는 `~/.config/ccx/update-check.json`).
 
 설치 스크립트를 다시 실행해도 됩니다 — 동일하게 최신 바이너리를 받아 덮어씁니다.
 
@@ -121,7 +121,7 @@ ccx -xSet "Codex"                # 인증 후 사용
 | sonnet | gpt-5.6-terra |
 | haiku  | gpt-5.6-luna |
 
-구형 ID(`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`)도 계속 유효합니다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있으니 그 경우 해당 슬롯을 `gpt-5.6-terra`로 바꾸세요. ChatGPT 백엔드는 `[1m]` suffix와 무관하게 컨텍스트 창을 272K로 캡하므로 프로파일에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`이 기본 포함됩니다 — 진짜 1M 컨텍스트가 필요하면 아래 OpenAI API 키 프로파일을 사용하세요.
+구형 ID(`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`)도 계속 유효합니다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있으니 그 경우 해당 슬롯을 `gpt-5.6-terra`로 바꾸세요. ChatGPT 백엔드는 `[1m]` suffix와 무관하게 컨텍스트 창을 272K로 캡하는데, ccx가 이를 알고 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`을 자동 적용합니다([컨텍스트 윈도우](#컨텍스트-윈도우) 참고). 진짜 1M 컨텍스트가 필요하면 아래 OpenAI API 키 프로파일을 사용하세요.
 
 상태/로그아웃: `ccx codex status` / `ccx codex logout`
 
@@ -143,6 +143,18 @@ ChatGPT 구독 대신 종량제 OpenAI API를 쓰고 싶다면 `openai-responses
 ```
 
 `apiKey`에는 키를 직접 넣거나 `env:변수명` 참조를 쓸 수 있습니다. 과금 주의: 입력이 272K 토큰을 넘는 요청은 OpenAI의 long-context 요율(해당 요청 전체에 입력 2배/출력 1.5배)로 과금됩니다 — 임계값 아래로 유지하고 싶으면 프로파일에 `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000" }`을 추가하세요.
+
+## 컨텍스트 윈도우
+
+Claude Code는 모르는 모델 ID의 컨텍스트 윈도우를 200K로 가정합니다. 대부분의 서드파티 모델과 어긋나는 값이라 — 128K 로컬 모델은 컨텍스트 오버플로가 나고, 1M DeepSeek 모델은 절반도 못 씁니다. ccx가 모델별로 이걸 교정합니다:
+
+- **모델 ID에 선언**: 프로파일 `models`에 `[131k]`, `[262k]`, `[1m]` 같은 suffix를 붙이세요 (예: `"sonnet": "kimi-k2.5[262k]"`). ccx가 이 표기를 Claude Code가 실제로 이해하는 형태 — 공식 `[1m]` 마커와 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 캡 — 로 변환하고, 프로바이더에는 suffix가 절대 전달되지 않게 제거합니다.
+- **카탈로그 자동 적용**: 알려진 모델(GLM, Kimi, DeepSeek, MiniMax, GPT-5.5/5.6)은 ccx에 정확한 수치가 내장되어 있어 suffix 없이도 올바른 윈도우가 적용됩니다. 카탈로그의 정확값(예: Kimi 262,144)이 `[262k]` floor 표기보다 정밀하므로, 알려진 모델은 suffix 없이 두는 것이 좋습니다.
+- **추가 시 자동 감지**: 메뉴에서 OpenRouter나 LM Studio 프로파일을 추가하면 ccx가 프로바이더에서 실제 컨텍스트 길이(LM Studio는 실제 로드된 값)를 조회해 suffix로 기록해 줍니다. OpenRouter 주의: 기록값은 모델 공표값과 1순위 프로바이더 값 중 작은 쪽인데, 로드밸런싱이 더 작은 컨텍스트를 서빙하는 하위 프로바이더로 라우팅할 수도 있습니다 — 문제가 되면 더 작은 `[Nk]` suffix를 직접 지정하세요.
+
+실행 배너에 해석 결과가 표시됩니다 (예: `Context: sonnet 262k (suffix) → auto-compact 262144`). 사용자 설정이 항상 우선입니다: 프로파일 `env`나 셸에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`를 직접 지정하면 계산값 대신 그 값이 쓰입니다 (둘 다 지정하면 프로파일 `env`가 최종 적용). 기능을 끄려면 `CCX_CONTEXT_AUTO=0` — 이때도 ccx 전용 `[Nk]` 표기는 모델 ID에서 제거해 요청이 깨지지 않게 하고, 그 외 컨텍스트 설정(Codex 272K 자동 캡 포함)은 일절 적용하지 않습니다.
+
+참고: auto-compact 윈도우는 세션당 단일값이라 opus/sonnet(및 최상위 `model`) 슬롯 중 가장 작은 윈도우를 채택합니다 (haiku는 제외 — 백그라운드 호출 전용이라 소형 haiku 모델이 세션 전체를 캡하는 일을 막습니다. 대신 배너에 경고를 띄웁니다).
 
 ## 알아두면 좋은 점
 

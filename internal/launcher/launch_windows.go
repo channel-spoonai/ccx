@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/ctxwin"
 )
 
 // Launch는 Windows에서 claude를 자식 프로세스로 실행하고 종료 코드를 전파한다.
@@ -20,12 +21,16 @@ func Launch(p *config.Profile, args []string) error {
 		return errClaudeNotFound
 	}
 
+	// 모델 ID의 컨텍스트 suffix/카탈로그 수치를 Claude Code가 인식하는
+	// 형태([1m] + AUTO_COMPACT_WINDOW)로 정규화 — 4개 auth 경로 공통.
+	p, ctxRes := ctxwin.Apply(p)
+
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)
 		if err != nil {
 			return err
 		}
-		printBanner(prepared)
+		printBanner(prepared, ctxRes)
 		printCodexOAuthBanner(prepared.BaseURL, "")
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
@@ -39,7 +44,7 @@ func Launch(p *config.Profile, args []string) error {
 		if err != nil {
 			return err
 		}
-		printBanner(prepared)
+		printBanner(prepared, ctxRes)
 		printOpenAIResponsesBanner(prepared.BaseURL, endpoint)
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
@@ -50,13 +55,13 @@ func Launch(p *config.Profile, args []string) error {
 		if err != nil {
 			return err
 		}
-		printBanner(prepared)
+		printBanner(prepared, ctxRes)
 		printOpenAIChatBanner(prepared.BaseURL, upstreamURL)
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
 
 	env := BuildEnv(p)
-	printBanner(p)
+	printBanner(p, ctxRes)
 	return runChildClaude(binary, args, env)
 }
 

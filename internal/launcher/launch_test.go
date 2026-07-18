@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/ctxwin"
 )
 
 func TestResolveSecret(t *testing.T) {
@@ -68,6 +69,48 @@ func TestUnresolvedEnvRefs(t *testing.T) {
 	missing := unresolvedEnvRefs(p)
 	if len(missing) != 1 || missing[0] != "CCX_TEST_ABSENT" {
 		t.Errorf("want [CCX_TEST_ABSENT], got %v", missing)
+	}
+}
+
+// Apply → BuildEnv 체인이 suffix 변환 결과를 실제 env로 반영하는지 통합 검증.
+func TestApplyThenBuildEnv(t *testing.T) {
+	for _, key := range []string{ctxwin.EnvKey, ctxwin.AutoEnv} {
+		if old, ok := os.LookupEnv(key); ok {
+			os.Unsetenv(key)
+			defer os.Setenv(key, old)
+		}
+	}
+
+	p := &config.Profile{
+		Name: "t",
+		Models: &config.Models{
+			Opus:   "deepseek-v4-pro", // 카탈로그 1M → [1m] 부착
+			Sonnet: "kimi-k2.5[262k]", // suffix → [1m] + ACW=262000
+			Haiku:  "GLM-4.5-Air",     // 카탈로그 131072, ACW 후보에서 제외
+		},
+	}
+	applied, res := ctxwin.Apply(p)
+	env := BuildEnv(applied)
+
+	has := func(needle string) bool {
+		for _, e := range env {
+			if strings.HasPrefix(e, needle) {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]") {
+		t.Errorf("opus not rewritten: %v", filterAnthropic(env))
+	}
+	if !has("ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.5[1m]") {
+		t.Errorf("sonnet not rewritten: %v", filterAnthropic(env))
+	}
+	if !has("ANTHROPIC_DEFAULT_HAIKU_MODEL=GLM-4.5-Air") {
+		t.Errorf("haiku changed unexpectedly: %v", filterAnthropic(env))
+	}
+	if !has(ctxwin.EnvKey + "=262000") {
+		t.Errorf("auto-compact window not injected: res=%+v", res)
 	}
 }
 

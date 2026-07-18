@@ -109,7 +109,7 @@ ccx -xSet "Codex"                # 라우팅 시작
 
 프로파일은 `auth: "codex-oauth"` 디스크리미네이터만 두고 baseUrl/authToken은 비워둔다 — ccx가 자동으로 로컬 프록시(랜덤 포트)를 띄우고 채워준다.
 
-모델 ID는 프록시에서 `[1m]`/`[200k]` 컨텍스트 suffix만 제거하고 그대로 업스트림에 패스스루된다 — 허용 목록이 없어 새 모델은 config 갱신만으로 사용 가능. 카탈로그 기본값은 GPT-5.6 패밀리(opus→`gpt-5.6-sol`, sonnet→`gpt-5.6-terra`, haiku→`gpt-5.6-luna`). **ChatGPT 백엔드는 컨텍스트를 272K로 캡**하므로(모델의 API 스펙이 1M이어도, openai/codex#32806 참고) 카탈로그 프로파일 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`을 포함한다 — 이건 버그가 아니라 백엔드 실측 한도. 전체 1M 컨텍스트는 `auth: "openai-responses"`(API 키) 경로에서만 가능. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있음(그 경우 `gpt-5.6-terra`로 대체).
+모델 ID는 프록시에서 `[1m]`/`[200k]` 컨텍스트 suffix만 제거하고 그대로 업스트림에 패스스루된다 — 허용 목록이 없어 새 모델은 config 갱신만으로 사용 가능. 카탈로그 기본값은 GPT-5.6 패밀리(opus→`gpt-5.6-sol`, sonnet→`gpt-5.6-terra`, haiku→`gpt-5.6-luna`). **ChatGPT 백엔드는 컨텍스트를 272K로 캡**하므로(모델의 API 스펙이 1M이어도, openai/codex#32806 참고) `ctxwin.Apply`가 codex-oauth 프로파일에 `min(W, 272000)` 캡을 자동 적용한다 — 이건 버그가 아니라 백엔드 실측 한도이며, 수동 env 지정은 더 이상 불필요(지정하면 그 값이 우선). 전체 1M 컨텍스트는 `auth: "openai-responses"`(API 키) 경로에서만 가능. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있음(그 경우 `gpt-5.6-terra`로 대체).
 
 **아키텍처**:
 - `internal/auth/codex/` — PKCE/디바이스 코드 OAuth 클라이언트, 토큰 저장(`~/.config/ccx/auth/codex.json` mode 0600), 자동 refresh
@@ -144,10 +144,32 @@ ChatGPT 구독 대신 종량제 OpenAI API 키로 같은 변환 경로를 쓴다
 - ChatGPT 백엔드의 272K 캡이 없어 GPT-5.6의 1M+ 컨텍스트를 그대로 사용. 단 272K 초과 입력은 long-context 요율(입력 2배/출력 1.5배) 과금 — 절약하려면 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000` 추가
 - 데몬 전달 환경변수: `CCX_CODEX_UPSTREAM_URL` / `CCX_CODEX_UPSTREAM_APIKEY` (`internal/proxy/codex/spawn.go`)
 
+## Context Windows (`internal/ctxwin`)
+
+Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추론하고 커스텀 ID는 200K로 가정한다. 오버라이드 수단은 둘뿐이다(2026-07 로컬 리스너 실측 완료):
+
+- `[1m]` suffix — 유일하게 공식 인식되는 suffix. Claude Code가 1M으로 인식하고 **API 전송 전 strip한다** (직결 프로바이더에도 안전). `[200k]` 같은 다른 suffix는 인식하지 않고 **업스트림에 리터럴로 보낸다** — 그래서 ccx가 env 주입 전에 반드시 제거해야 한다.
+- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — 인식 용량 설정, 단 모델 추론 윈도우로 캡되어 **하향만 가능**.
+
+`ctxwin.Apply`(Launch 최상단, 4개 auth 경로 공통)가 프로파일 copy의 모델 ID suffix(없으면 `catalog.go`의 정적 수치)를 전달 공식으로 변환한다: W≥1M → `[1m]` / 200K<W<1M → `[1m]`+ACW=W / W==200K → 표기 제거만 / W<200K → ACW=W. **200K<W<1M 구간의 `[1m]`+ACW는 분리 불가능한 짝** — 이 불변식 때문에 (a) ACW 후보에서 제외되는 haiku는 W≥1M일 때만 `[1m]`을 받고(짝 없는 `[1m]`은 1M 과대 인식), (b) 사용자 명시 ACW가 티어 실제 윈도우보다 크면 그 티어의 `[1m]` 부착을 생략한다(200K 추정이 안전). ACW는 전역 단일값이라 opus/sonnet/model 중 min을 채택하고 haiku는 제외(소형 haiku가 세션 전체를 캡하는 것 방지, 대신 배너 경고). codex-oauth는 소스 무관 `min(W, 272000)` 캡. 우선순위: 사용자 명시값(`profile.env` > ambient — BuildEnv의 p.Env 루프가 마지막이라) > 계산값. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
+
+프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min)와 LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백)가 감지값을 `ContextSuffix`로 모델 ID에 박제한다. z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
+
 ## Installation
 
 `install.sh`를 실행하면 `~/.local/bin/ccx` shim이 생성됨 (macOS/Linux 공용).
 `~/.local/bin`이 PATH에 포함되어 있어야 `ccx` 명령어로 직접 실행 가능.
+
+## Updating (자동 업데이트 아키텍처)
+
+`internal/update/` — 버전 체크·알림·자동 적용을 담당. 흐름:
+
+1. **체크(24h 캐시)**: 시작 시 `MaybeNotify`(check.go)가 캐시(`~/.config/ccx/update-check.json`)를 본다. fresh(<24h)하고 새 태그면 태그 반환, stale이면 백그라운드 goroutine으로 fetch만 하고 통과. **Unix launch는 `syscall.Exec`라 goroutine이 죽으므로**, launch 직전 `WaitBackgroundFetch(2s)`(main.go의 두 Launch 지점)가 캐시 쓰기를 보장한다 — 이 호출을 제거하면 `-xSet` 직행 사용자는 체크가 영영 완료되지 않는다.
+2. **자동 적용**: 캐시가 새 버전을 알 때만 `TryAutoUpdate`(autoupdate.go)가 시작 시 다운로드+교체를 시도(60s 타임아웃). 게이팅(`shouldAutoApply`, 네트워크 없음): dev 빌드 / `CCX_AUTO_UPDATE=0|false|off` opt-out / stdin 비-TTY(스크립트 보호) / 캐시의 실패 마커(`auto_update_failed_tag`) / 바이너리 디렉터리 쓰기 불가 — 걸리면 기존 한 줄 알림으로 폴백. 단 dev 빌드는 `MaybeNotify` 단계에서 이미 제외되어 알림 자체가 없다(게이트의 dev 확인은 방어적 이중화). 실패 시 마커를 기록해 같은 태그는 24h(다음 fetch가 캐시를 덮어쓸 때까지) 재시도하지 않는다. 성공해도 re-exec하지 않음 — 새 버전은 다음 실행부터.
+3. **수동**: `ccx update`(cmd/ccx/update.go)는 게이팅 없이 5분 타임아웃으로 `Apply` 호출.
+4. **교체**: `atomicReplace` — Unix는 `os.Rename`(inode 교체), Windows는 실행 중 PE를 덮어쓸 수 없어 `ccx.exe → ccx.exe.old-<pid>` rename 후 배치. `.old-*` 잔재와 중단된 임시파일(`ccx-dl-*`, `ccx-new-*`, mtime 1h 초과)은 다음 실행의 `CleanupStaleBinary`가 청소. Windows에서 ccx는 claude 세션 내내 생존하므로 `.old`가 세션 종료까지 잠겨 있는 게 정상 — PID 유니크 이름이 다중 세션 충돌을 막는다.
+
+**데몬 프로토콜 계약 동결**: 자동 업데이트로 "구버전 부모 ccx + 신버전 데몬 바이너리" 조합이 상시화된다(부모가 `os.Executable()` 경로를 spawn하는데 그 경로는 이미 새 바이너리). 따라서 hidden 서브커맨드명(`__codex-proxy`, `__openai-chat-proxy`), 데몬 env 키(`CCX_CODEX_UPSTREAM_*` 등), ready 프로토콜(`"ready <port>\n"`)은 **변경 금지, 추가만 허용**.
 
 ## Releasing
 

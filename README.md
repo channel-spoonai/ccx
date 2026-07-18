@@ -26,13 +26,13 @@ The install script adds `~/.local/bin` to your PATH automatically. If it isn't i
 
 ### Update
 
-If ccx is already installed, update to the latest release with:
+ccx keeps itself up to date automatically: it checks GitHub for new releases once a day (cached at `~/.config/ccx/update-check.json`), and when the check finds a new release, the next startup applies it automatically before the profile menu — the new version takes effect from the following run. To opt out, set `CCX_AUTO_UPDATE=0`. Non-TTY/scripted runs and installs in non-writable locations fall back to a one-line notice instead of auto-applying; dev builds (built from source) skip the update check entirely.
+
+You can always update manually and immediately with:
 
 ```bash
 ccx update
 ```
-
-ccx checks GitHub for new releases once a day and shows a one-line notice in the menu header when an update is available (cached at `~/.config/ccx/update-check.json`).
 
 Re-running the install script also works — it downloads the latest binary and overwrites the existing one.
 
@@ -109,7 +109,7 @@ Model mapping (Claude Code tier → Codex model):
 | sonnet | gpt-5.6-terra |
 | haiku  | gpt-5.6-luna |
 
-Older IDs (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`) remain valid. `gpt-5.6-sol` may be unavailable on some ChatGPT plans — switch that slot to `gpt-5.6-terra` if rejected. The ChatGPT backend caps the context window at 272K regardless of the `[1m]` suffix, so the profile ships with `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`; for the full 1M window use the OpenAI API key profile below.
+Older IDs (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`) remain valid. `gpt-5.6-sol` may be unavailable on some ChatGPT plans — switch that slot to `gpt-5.6-terra` if rejected. The ChatGPT backend caps the context window at 272K regardless of the `[1m]` suffix; ccx knows this and applies `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000` automatically (see [Context windows](#context-windows)). For the full 1M window use the OpenAI API key profile below.
 
 Status / logout: `ccx codex status` / `ccx codex logout`
 
@@ -131,6 +131,18 @@ Prefer the pay-as-you-go OpenAI API over a ChatGPT subscription? The `openai-res
 ```
 
 `apiKey` takes a literal key or an `env:VAR` reference. Heads-up on billing: prompts over 272K input tokens are charged at OpenAI's long-context rates (2× input / 1.5× output for the whole request) — add `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000" }` to the profile if you'd rather stay under that threshold.
+
+## Context windows
+
+Claude Code assumes a 200K context window for model IDs it doesn't recognize. That mismatches most third-party models — a 128K local model overflows hard, a 1M DeepSeek model gets underused. ccx fixes this per model:
+
+- **Declare it in the model ID**: append `[131k]`, `[262k]`, `[1m]`-style suffixes in your profile's `models` (e.g. `"sonnet": "kimi-k2.5[262k]"`). ccx translates the suffix into what Claude Code actually understands — the official `[1m]` marker and/or a `CLAUDE_CODE_AUTO_COMPACT_WINDOW` cap — and strips it so it never reaches the provider.
+- **Or let the catalog handle it**: for known models (GLM, Kimi, DeepSeek, MiniMax, GPT-5.5/5.6) ccx ships accurate numbers built in; profiles without suffixes still get the right window — and the catalog's exact values (e.g. Kimi 262,144) beat what a `[262k]` floor suffix can express, so leave known models unsuffixed.
+- **Auto-detection on add**: when adding OpenRouter or LM Studio profiles through the menu, ccx queries the provider for the real context length (for LM Studio, the actually-loaded context) and records it as a suffix for you. Caveat for OpenRouter: the recorded value is the smaller of the model's advertised length and its top-ranked provider's — load-balanced requests can still land on a lower-ranked provider serving less; pin a smaller `[Nk]` suffix yourself if that bites you.
+
+The launch banner shows what was resolved, e.g. `Context: sonnet 262k (suffix) → auto-compact 262144`. Your own settings always win: an explicit `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the profile `env` or your shell disables the computed value (if both are set, the profile `env` is what reaches Claude Code). Set `CCX_CONTEXT_AUTO=0` to turn the feature off — ccx then only strips its own `[Nk]` notation from model IDs so requests stay valid, and applies no context settings (including the automatic Codex 272K cap).
+
+Note: since the auto-compact window is a single per-session value, ccx uses the smallest window among the opus/sonnet (and top-level `model`) slots — haiku is excluded, as it only serves background calls and a tiny haiku model would needlessly cap the whole session; the banner warns instead.
 
 ## Notes
 
