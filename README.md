@@ -34,7 +34,7 @@ You can always update manually and immediately with:
 ccx update
 ```
 
-Re-running the install script also works — it downloads the latest binary and overwrites the existing one.
+Re-running the install script also works — it downloads the latest binary and overwrites the existing one. This is the way to upgrade from versions too old to have `ccx update` or auto-update (v0.1.x): just run the install one-liner again.
 
 ## Usage
 
@@ -151,7 +151,7 @@ Note: since the auto-compact window is a single per-session value, ccx uses the 
 
 ## Build from source
 
-Requires Go 1.21+.
+Requires Go 1.26+ (matches `go.mod`).
 
 ```bash
 git clone https://github.com/channel-spoonai/ccx.git

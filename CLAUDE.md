@@ -157,8 +157,9 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 ## Installation
 
-`install.sh`를 실행하면 `~/.local/bin/ccx` shim이 생성됨 (macOS/Linux 공용).
-`~/.local/bin`이 PATH에 포함되어 있어야 `ccx` 명령어로 직접 실행 가능.
+`install.sh`(macOS/Linux)는 `releases/latest`를 조회해 최신 아카이브를 받아 `~/.local/bin/ccx`(`CCX_BIN_DIR`로 오버라이드)에 설치한다. `~/.local/bin`이 PATH에 있어야 `ccx`로 직접 실행 가능. Windows는 `install.ps1`이 `%LOCALAPPDATA%\Programs\ccx\ccx.exe`에 설치한다.
+
+설치 스크립트 재실행은 버전과 무관하게 최신 바이너리를 같은 경로에 덮어쓰므로, 자동 업데이트/`ccx update`가 없던 구버전(v0.1.x)에서 올라오는 유일한 경로다.
 
 ## Updating (자동 업데이트 아키텍처)
 
@@ -173,9 +174,11 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 ## Releasing
 
-릴리즈는 `/release` 슬래시 명령으로 자동화되어 있다(`v*` 태그 push → GitHub Actions가 goreleaser로 5개 OS/arch 아카이브 생성).
+`v*` 태그를 push하면 **`.github/workflows/release.yml`**이 `go test ./...` 후 goreleaser(`.goreleaser.yaml`)로 `release --clean`을 실행해 5개 OS/arch 아카이브 + `checksums.txt`를 담은 GitHub Release를 만든다(darwin/linux × amd64/arm64, windows/amd64 — windows/arm64는 제외). 인증은 워크플로가 주입하는 `GITHUB_TOKEN`을 쓰므로 CI 쪽 시크릿 설정은 불필요.
 
-GitHub push 인증은 **레포 루트의 `.env` 파일**(gitignore됨)에 저장된 `GIT_RELEASE_TOKEN`을 사용한다. osxkeychain이나 remote URL은 건드리지 않는다 — 토큰은 일회성 credential helper로만 주입한다:
+**자산 명명 계약(변경 금지)**: `ccx-{버전(v 없이)}-{os}-{arch}.tar.gz`(windows는 `.zip`), 바이너리는 아카이브 루트의 `ccx`(windows `ccx.exe`). 이 규칙은 `install.sh`/`install.ps1`과 자동 업데이터(`internal/update/release.go`의 `assetName`)가 공유하므로 셋 중 하나만 바꾸면 설치/업데이트가 깨진다. goreleaser의 `before.hooks`가 `cp ccx.config.example.json internal/config/`로 임베드 사본을 동기화한다(build.sh와 동일 계약).
+
+로컬에서 태그를 push하는 경로의 GitHub 인증은 **레포 루트의 `.env` 파일**(gitignore됨)에 저장된 `GIT_RELEASE_TOKEN`을 쓴다. osxkeychain이나 remote URL은 건드리지 않고 일회성 credential helper로만 주입한다:
 
 ```bash
 set -a; . ./.env; set +a
@@ -184,7 +187,7 @@ git -c credential.helper= \
     push origin main vX.Y.Z
 ```
 
-토큰이 만료/회수되면 `.env`만 갱신하면 된다. 401/403 응답이 나오면 사용자에게 갱신 요청.
+토큰이 만료/회수되면 `.env`만 갱신하면 된다. 401/403 응답이 나오면 사용자에게 갱신 요청. (Windows GCM에 저장된 개인 계정으로는 `channel-spoonai/ccx` push가 403날 수 있으니 이 토큰 경로를 쓸 것.)
 
 ## Key Conventions
 
