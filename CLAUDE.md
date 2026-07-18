@@ -64,22 +64,84 @@ ccx는 Claude Code를 재사용하기 때문에 **Anthropic 호환 엔드포인�
 | MiniMax | `https://api.minimax.io/anthropic` | `apiKey` | platform.minimax.io/docs/api-reference/text-anthropic-api |
 | OpenRouter | `https://openrouter.ai/api` | `apiKey` | openrouter.ai/docs — Claude Code가 `/v1/messages`를 자동 append하므로 `/v1` 없이 지정. 모델 ID는 `provider/model[:tag]` 형식 (예: `google/gemma-2-9b-it:free`) |
 | LM Studio (로컬) | `http://localhost:1234` | `authToken: "lmstudio"` (더미, 선택) | lmstudio.ai/docs/developer/anthropic-compat, v0.4.1+ 필요 |
+| Lightning-MLX (로컬) | `http://127.0.0.1:<port>` | `authToken` (더미, 선택) | `auth: "openai-chat"` 디스크리미네이터 사용 — ccx가 OpenAI Chat Completions 변환 프록시를 띄워 라우팅. 모델 ID는 `/v1/models` 응답값(서버 기본 `local`) |
 
-**로컬 프로바이더 주의사항**: 모델 ID는 LM Studio에서 로드한 실제 식별자여야 한다(예: `ibm/granite-4-micro`). Claude Code가 기대하는 툴 사용/캐시 제어 동작을 로컬 모델이 완전히 지원하지 않을 수 있다.
+**로컬 프로바이더 주의사항**: 모델 ID는 LM Studio/Lightning-MLX에 실제 로드된 식별자여야 한다(예: LM Studio `ibm/granite-4-micro`, Lightning-MLX `local`). Claude Code가 기대하는 툴 사용/캐시 제어 동작을 로컬 모델이 완전히 지원하지 않을 수 있다.
 
-### 미지원: OAuth 기반 프로바이더
+### OpenAI Chat Completions 변환 프로바이더: `auth: "openai-chat"`
 
-**ChatGPT Plus / Codex 구독 계정은 ccx에서 직접 사용할 수 없다.** ccx는 OAuth 플로우를 수행하지 않고 정적 토큰만 주입한다. OpenAI는 Anthropic 호환 엔드포인트를 제공하지 않기 때문에 브릿지 프록시가 필요하다. 실사용 시 패턴:
+OpenAI 호환 `/v1/chat/completions` 엔드포인트만 노출하고 Anthropic `/v1/messages`는 지원하지 않거나, Anthropic 엔드포인트가 있어도 streaming 사양이 Claude Code와 충돌하는 서버를 위해 ccx 내장 변환 프록시를 사용한다. lightning-mlx, vLLM, LocalAI, 일부 OpenRouter 모델 등에 활용.
 
-1. 별도 프록시(예: `anthropic-max-router`, `claude-to-chatgpt`)를 로컬에서 실행해 OAuth/ChatGPT 쿠키를 처리하고 `http://localhost:PORT`에 Anthropic 호환 엔드포인트를 노출
-2. ccx 프로파일의 `baseUrl`을 그 로컬 URL로 지정
+```json
+{
+  "name": "lightning-mlx (local)",
+  "auth": "openai-chat",
+  "baseUrl": "http://127.0.0.1:8010",
+  "authToken": "lightning-mlx",
+  "models": { "opus": "local", "sonnet": "local", "haiku": "local" }
+}
+```
 
-프록시 쪽에서 인증이 끝나므로 ccx의 `authToken`은 더미로도 충분하다.
+**아키텍처**:
+- `internal/translate/openaichat/` — Anthropic Messages ↔ OpenAI Chat Completions 변환 (request/accumulate/sse)
+- `internal/proxy/openaichat/` — 로컬 HTTP 프록시 + self-respawn 데몬 (`__openai-chat-proxy` hidden 서브명령)
+- 라우팅 흐름은 codex 어댑터와 동일: 부모 ccx → SpawnDaemon (자식이 ready 메시지로 포트 보고) → syscall.Exec(claude) → 자식이 부모 PID polling으로 종료 감지
+
+**enable_thinking 처리**: 디폴트는 `false`. lightning-mlx 같은 Qwen3 reasoning 모델은 streaming 시 `delta.reasoning_content`로 chain-of-thought를 흘리며 동일 token budget을 공유해 실제 응답이 1-2글자만 남는 사양 차이가 있다. Claude Code는 이 비표준 필드를 활용할 수 없으므로 reasoning을 비활성화한다. 사용자가 reasoning을 활성화하려면 `profile.env`에 `"CCX_OPENAICHAT_ENABLE_THINKING": "true"` 추가.
+
+**한계 / 위험**:
+- prompt caching (Anthropic 전용) 같은 헤더는 strip됨
+- tool_result 내 이미지는 텍스트 placeholder로 치환 (대부분의 OpenAI 호환 서버는 tool role content를 string만 받음)
+- 토큰 카운트는 chars/4 휴리스틱 — 정확한 토크나이저 없음
+
+### OAuth 기반 프로바이더: ChatGPT (Codex)
+
+ChatGPT Plus/Pro/Business 구독을 OAuth로 인증해 Claude Code를 라우팅한다. 별도 프록시 바이너리 없이 ccx 내장.
+
+```bash
+ccx codex login                  # 브라우저 PKCE 플로우
+ccx codex login --device         # 헤드리스/SSH 환경용 디바이스 코드 플로우
+ccx codex status                 # 현재 인증 상태
+ccx codex logout                 # 토큰 삭제
+ccx -xSet "ChatGPT (Codex)"      # 라우팅 시작
+```
+
+프로파일은 `auth: "codex-oauth"` 디스크리미네이터만 두고 baseUrl/authToken은 비워둔다 — ccx가 자동으로 로컬 프록시(랜덤 포트)를 띄우고 채워준다.
+
+**아키텍처**:
+- `internal/auth/codex/` — PKCE/디바이스 코드 OAuth 클라이언트, 토큰 저장(`~/.config/ccx/auth/codex.json` mode 0600), 자동 refresh
+- `internal/translate/codex/` — Anthropic Messages ↔ OpenAI Responses 변환 + SSE 스트리밍
+- `internal/proxy/codex/` — 로컬 HTTP 프록시 + self-respawn 데몬 (`__codex-proxy` hidden 서브명령)
+- 부모 ccx → `SpawnDaemon` (자식이 ready 메시지로 포트 보고) → `syscall.Exec(claude)` 로 PID 보존 전환 → 자식이 부모 PID(=claude) polling으로 종료 감지
+
+**OAuth 파라미터**(`internal/auth/codex/constants.go`): client_id `app_EMoamEEZ73f0CkXaXp7hrann`, originator `claude-code-proxy` — OpenAI가 식별하는 값이라 변경 시 즉시 차단될 수 있어 의도적으로 raine/claude-code-proxy 구현체와 동일하게 유지.
+
+**한계 / 위험**:
+- ChatGPT 구독을 비공식 클라이언트로 사용하는 것은 OpenAI ToS의 회색지대 — 계정 정지 위험 존재
+- Codex의 reasoning 콘텐츠는 strip되어 Claude Code의 thinking UI에 표시되지 않음
+- tool_result 내 이미지는 `[image omitted]` 플레이스홀더로 치환 (Codex 백엔드가 거부)
+- prompt caching, computer-use 같은 Anthropic 전용 기능은 strip됨
+- 토큰 카운트는 정확한 토크나이저 없이 chars/4 휴리스틱 — 한국어/CJK는 underestimate 가능
 
 ## Installation
 
 `install.sh`를 실행하면 `~/.local/bin/ccx` shim이 생성됨 (macOS/Linux 공용).
 `~/.local/bin`이 PATH에 포함되어 있어야 `ccx` 명령어로 직접 실행 가능.
+
+## Releasing
+
+릴리즈는 `/release` 슬래시 명령으로 자동화되어 있다(`v*` 태그 push → GitHub Actions가 goreleaser로 5개 OS/arch 아카이브 생성).
+
+GitHub push 인증은 **레포 루트의 `.env` 파일**(gitignore됨)에 저장된 `GIT_RELEASE_TOKEN`을 사용한다. osxkeychain이나 remote URL은 건드리지 않는다 — 토큰은 일회성 credential helper로만 주입한다:
+
+```bash
+set -a; . ./.env; set +a
+git -c credential.helper= \
+    -c "credential.helper=!f() { echo username=x-access-token; echo password=$GIT_RELEASE_TOKEN; }; f" \
+    push origin main vX.Y.Z
+```
+
+토큰이 만료/회수되면 `.env`만 갱신하면 된다. 401/403 응답이 나오면 사용자에게 갱신 요청.
 
 ## Key Conventions
 

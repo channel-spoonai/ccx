@@ -39,7 +39,7 @@ func PromptLine(question string, opts PromptOptions) (string, error) {
 			return "", err
 		}
 		if opts.Required && value == "" {
-			fmt.Println("  \x1B[31m값이 필요합니다.\x1B[0m")
+			fmt.Println("  \x1B[31mValue required.\x1B[0m")
 			continue
 		}
 		return value, nil
@@ -132,7 +132,7 @@ func PromptChoice(question string, choices []string) (int, error) {
 		fmt.Printf("    %d. %s\n", i+1, c)
 	}
 	for {
-		ans, err := PromptLine("번호", PromptOptions{Required: true})
+		ans, err := PromptLine("number", PromptOptions{Required: true})
 		if err != nil {
 			return 0, err
 		}
@@ -140,6 +140,6 @@ func PromptChoice(question string, choices []string) (int, error) {
 		if err == nil && idx >= 1 && idx <= len(choices) {
 			return idx - 1, nil
 		}
-		fmt.Println("  \x1B[31m유효하지 않은 번호입니다.\x1B[0m")
+		fmt.Println("  \x1B[31mInvalid number.\x1B[0m")
 	}
 }

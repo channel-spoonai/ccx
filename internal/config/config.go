@@ -1,11 +1,19 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// embeddedExample은 빌드 시점에 바이너리에 포함되는 카탈로그 사본.
+// 모듈 루트의 ccx.config.example.json은 정본이며, build.sh가 이 위치로 동기화한다.
+// 디스크에서 example 파일을 찾지 못할 때(설치 환경 등) LoadExample이 폴백으로 사용한다.
+//
+//go:embed ccx.config.example.json
+var embeddedExample []byte
 
 const (
 	Filename        = "ccx.config.json"
@@ -28,6 +36,11 @@ type Profile struct {
 	Model       string            `json:"model,omitempty"`
 	Models      *Models           `json:"models,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
+
+	// Auth 는 인증 방식 디스크리미네이터. 빈 문자열이면 기존 정적 토큰 흐름.
+	// "codex-oauth" 면 launcher가 ChatGPT(OpenAI Codex) OAuth 흐름으로 분기 —
+	// baseUrl/authToken/apiKey 필드는 무시되고 ccx가 로컬 프록시를 띄워 자동 주입한다.
+	Auth string `json:"auth,omitempty"`
 }
 
 type Config struct {
@@ -124,7 +137,7 @@ func Load() (*Loaded, error) {
 	path := DefaultPath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if from, ok := tryMigrateLegacy(path); ok {
-			fmt.Fprintf(os.Stderr, "[ccx] 설정 파일을 %s → %s 로 이동했습니다.\n", from, path)
+			fmt.Fprintf(os.Stderr, "[ccx] Moved config file from %s → %s\n", from, path)
 		} else {
 			return &Loaded{Path: path, Missing: true}, nil
 		}
@@ -132,17 +145,17 @@ func Load() (*Loaded, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("설정 파일 읽기 오류: %w", err)
+		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("설정 파일 파싱 오류: %w", err)
+		return nil, fmt.Errorf("error parsing config file: %w", err)
 	}
 
 	for i, p := range cfg.Profiles {
 		if p.Name == "" {
-			return nil, fmt.Errorf("프로파일 #%d에 \"name\" 필드가 없습니다", i+1)
+			return nil, fmt.Errorf("profile #%d is missing the \"name\" field", i+1)
 		}
 	}
 
@@ -206,7 +219,10 @@ func LoadExample() ([]Profile, error) {
 	path := ExamplePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		if len(embeddedExample) == 0 {
+			return nil, err
+		}
+		raw = embeddedExample
 	}
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
