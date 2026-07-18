@@ -2,13 +2,14 @@ package openaichat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/channel-spoonai/ccx/internal/procutil"
 )
 
 type DaemonOptions struct {
@@ -72,7 +73,12 @@ func RunDaemon(opts DaemonOptions) error {
 	return srv.Shutdown(shutCtx)
 }
 
+// watchParent는 ppid를 polling하며 살아있는지 본다. 죽으면 cancel().
+// procutil.Watcher가 시작 시점에 프로세스 핸들을 보유해(Windows) PID 재사용 오판을 막는다.
+// unix는 signal 0 판정.
 func watchParent(ctx context.Context, ppid int, cancel context.CancelFunc) {
+	w := procutil.NewWatcher(ppid)
+	defer w.Close()
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
@@ -80,24 +86,10 @@ func watchParent(ctx context.Context, ppid int, cancel context.CancelFunc) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if !processAlive(ppid) {
+			if !w.Alive() {
 				cancel()
 				return
 			}
 		}
 	}
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-			return false
-		}
-		return true
-	}
-	return true
 }

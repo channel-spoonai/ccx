@@ -30,6 +30,20 @@ func Launch(p *config.Profile, args []string) error {
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
 
+	if p.Auth == AuthOpenAIResponses {
+		endpoint, err := openAIResponsesEndpoint(p)
+		if err != nil {
+			return err
+		}
+		prepared, err := prepareOpenAIResponses(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared)
+		printOpenAIResponsesBanner(prepared.BaseURL, endpoint)
+		return runChildClaude(binary, args, BuildEnv(prepared))
+	}
+
 	if p.Auth == AuthOpenAIChat {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		prepared, err := prepareOpenAIChat(p)

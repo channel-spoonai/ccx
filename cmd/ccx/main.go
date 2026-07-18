@@ -235,6 +235,11 @@ func runProxyDaemon() {
 	err := proxy.RunDaemon(proxy.DaemonOptions{
 		ParentPID:    ppid,
 		SharedSecret: secret,
+		Upstream: proxy.UpstreamConfig{
+			// 미설정이면 zero value → ChatGPT OAuth 모드.
+			Endpoint: os.Getenv(proxy.CCXUpstreamURLEnv),
+			APIKey:   os.Getenv(proxy.CCXUpstreamAPIKeyEnv),
+		},
 		// IdleTimeout 비활성 — 부모 PID polling(1초 간격, ESRCH 감지)이 lifetime을 정확히 관리.
 		// 10분 idle로 자체 종료하면 사용자가 작업 재개 시 ConnectionRefused 발생.
 		IdleTimeout: 0,

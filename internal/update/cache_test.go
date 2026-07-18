@@ -3,6 +3,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -39,12 +40,14 @@ func TestSaveLoadCache(t *testing.T) {
 	}
 
 	// 퍼미션 0600 확인 (Windows는 mode가 다르게 보고됨 — Unix만 검증)
-	info, err := os.Stat(CachePath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Errorf("cache file mode = %o, want 0600 (other bits not set)", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(CachePath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Errorf("cache file mode = %o, want 0600 (other bits not set)", info.Mode().Perm())
+		}
 	}
 }
 

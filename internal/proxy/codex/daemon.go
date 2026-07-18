@@ -2,24 +2,30 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/channel-spoonai/ccx/internal/procutil"
 )
 
 // DaemonOptions는 RunDaemon의 입력.
 type DaemonOptions struct {
 	// ParentPID가 0보다 크면 그 프로세스가 사라지는 즉시 데몬도 종료한다.
-	// 보통 ccx 부모가 자기 PID를 넘긴다. ccx → claude로 syscall.Exec할 때 PID는 보존되므로
-	// 이 polling이 정확히 claude의 종료를 잡는다.
+	// 보통 ccx 부모가 자기 PID를 넘긴다. unix: ccx → claude로 syscall.Exec할 때 PID가
+	// 보존되므로 이 polling이 정확히 claude의 종료를 잡는다. Windows: exec 등가물이 없어
+	// 부모=ccx이고 ccx가 cmd.Run()으로 claude를 대기하므로 claude와의 결합은 간접적 —
+	// ccx만 비정상 종료하면 살아있는 claude의 프록시가 소멸하는 알려진 갭이 있다.
 	ParentPID int
 
 	// SharedSecret은 부모가 만든 랜덤 시크릿을 자식이 받아 서버 인증에 쓰는 값.
 	SharedSecret string
+
+	// Upstream은 forwarding 대상. zero value면 ChatGPT OAuth 모드.
+	Upstream UpstreamConfig
 
 	// IdleTimeout은 마지막 요청 후 이 시간 동안 추가 요청이 없으면 종료. 0이면 비활성.
 	IdleTimeout time.Duration
@@ -46,6 +52,7 @@ func RunDaemon(opts DaemonOptions) error {
 	srv, err := Start(ServerOptions{
 		Listener:     listener,
 		SharedSecret: opts.SharedSecret,
+		Upstream:     opts.Upstream,
 		IdleTimeout:  opts.IdleTimeout,
 	})
 	if err != nil {
@@ -84,7 +91,11 @@ func RunDaemon(opts DaemonOptions) error {
 }
 
 // watchParent는 ppid를 polling하며 살아있는지 본다. 죽으면 cancel().
+// procutil.Watcher가 시작 시점에 프로세스 핸들을 보유해(Windows) PID 재사용 오판을 막는다.
+// unix는 signal 0 판정.
 func watchParent(ctx context.Context, ppid int, cancel context.CancelFunc) {
+	w := procutil.NewWatcher(ppid)
+	defer w.Close()
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
@@ -92,28 +103,10 @@ func watchParent(ctx context.Context, ppid int, cancel context.CancelFunc) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if !processAlive(ppid) {
+			if !w.Alive() {
 				cancel()
 				return
 			}
 		}
 	}
-}
-
-// processAlive는 PID에 signal 0을 보내 존재 여부를 확인.
-// macOS/Linux 공통 — Windows에서는 별도 OSError 처리가 필요하지만 ccx 데몬은 unix만 사용.
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		// ESRCH → 프로세스 없음. EPERM은 권한 문제 (있긴 함).
-		if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
-			return false
-		}
-		// EPERM 등은 살아있다고 보고 계속 polling.
-		return true
-	}
-	return true
 }

@@ -100,7 +100,7 @@ cat src/main.go | ccx -xSet "LM Studio (local)" -p "버그 가능성 짚어줘"
 
 ## 지원 프로바이더
 
-z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬) · ChatGPT (Codex)
+z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬) · ChatGPT (Codex) · OpenAI API
 
 기본 설정은 바이너리에 카탈로그로 임베드되어 있어 손댈 필요가 없습니다. 메뉴에서 추가하고 API 키만 입력하면 동작합니다.
 
@@ -121,9 +121,28 @@ ccx -xSet "Codex"                # 인증 후 사용
 | sonnet | gpt-5.6-terra |
 | haiku  | gpt-5.6-luna |
 
-구형 ID(`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`)도 계속 유효합니다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있으니 그 경우 해당 슬롯을 `gpt-5.6-terra`로 바꾸세요. GPT-5.6 구독의 컨텍스트 창은 272K라서 프로파일에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`이 기본 포함됩니다.
+구형 ID(`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`)도 계속 유효합니다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있으니 그 경우 해당 슬롯을 `gpt-5.6-terra`로 바꾸세요. ChatGPT 백엔드는 `[1m]` suffix와 무관하게 컨텍스트 창을 272K로 캡하므로 프로파일에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`이 기본 포함됩니다 — 진짜 1M 컨텍스트가 필요하면 아래 OpenAI API 키 프로파일을 사용하세요.
 
 상태/로그아웃: `ccx codex status` / `ccx codex logout`
+
+### OpenAI API 키로 사용하기 (Responses API)
+
+ChatGPT 구독 대신 종량제 OpenAI API를 쓰고 싶다면 `openai-responses` 프로파일을 사용합니다. API 키로 공식 Responses API(`https://api.openai.com/v1/responses`)에 직접 라우팅하며 — OAuth가 필요 없고 272K 캡도 없어 GPT-5.6 모델의 전체 1M+ 컨텍스트를 쓸 수 있습니다.
+
+```json
+{
+  "name": "OpenAI API",
+  "auth": "openai-responses",
+  "apiKey": "env:OPENAI_API_KEY",
+  "models": {
+    "opus": "gpt-5.6-sol[1m]",
+    "sonnet": "gpt-5.6-terra[1m]",
+    "haiku": "gpt-5.6-luna"
+  }
+}
+```
+
+`apiKey`에는 키를 직접 넣거나 `env:변수명` 참조를 쓸 수 있습니다. 과금 주의: 입력이 272K 토큰을 넘는 요청은 OpenAI의 long-context 요율(해당 요청 전체에 입력 2배/출력 1.5배)로 과금됩니다 — 임계값 아래로 유지하고 싶으면 프로파일에 `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000" }`을 추가하세요.
 
 ## 알아두면 좋은 점
 

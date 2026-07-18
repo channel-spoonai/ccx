@@ -88,7 +88,7 @@ This pattern works with any provider. All flags other than `-xSet` are forwarded
 
 ## Supported Providers
 
-z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (local) · ChatGPT (Codex)
+z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (local) · ChatGPT (Codex) · OpenAI API
 
 Profiles are embedded in the binary — no manual config needed. Just pick from the menu and enter your API key.
 
@@ -109,9 +109,28 @@ Model mapping (Claude Code tier → Codex model):
 | sonnet | gpt-5.6-terra |
 | haiku  | gpt-5.6-luna |
 
-Older IDs (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`) remain valid. `gpt-5.6-sol` may be unavailable on some ChatGPT plans — switch that slot to `gpt-5.6-terra` if rejected. GPT-5.6 subscriptions have a 272K context window, so the profile ships with `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`.
+Older IDs (`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`) remain valid. `gpt-5.6-sol` may be unavailable on some ChatGPT plans — switch that slot to `gpt-5.6-terra` if rejected. The ChatGPT backend caps the context window at 272K regardless of the `[1m]` suffix, so the profile ships with `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`; for the full 1M window use the OpenAI API key profile below.
 
 Status / logout: `ccx codex status` / `ccx codex logout`
+
+### OpenAI API key (Responses API)
+
+Prefer the pay-as-you-go OpenAI API over a ChatGPT subscription? The `openai-responses` profile routes Claude Code through the official Responses API (`https://api.openai.com/v1/responses`) with your API key — no OAuth, and no 272K cap: GPT-5.6 models get their full 1M+ context window.
+
+```json
+{
+  "name": "OpenAI API",
+  "auth": "openai-responses",
+  "apiKey": "env:OPENAI_API_KEY",
+  "models": {
+    "opus": "gpt-5.6-sol[1m]",
+    "sonnet": "gpt-5.6-terra[1m]",
+    "haiku": "gpt-5.6-luna"
+  }
+}
+```
+
+`apiKey` takes a literal key or an `env:VAR` reference. Heads-up on billing: prompts over 272K input tokens are charged at OpenAI's long-context rates (2× input / 1.5× output for the whole request) — add `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000" }` to the profile if you'd rather stay under that threshold.
 
 ## Notes
 

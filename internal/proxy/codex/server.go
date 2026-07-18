@@ -30,7 +30,11 @@ type ServerOptions struct {
 	SharedSecret string
 
 	// AuthManager가 없으면 디스크 기반 토큰을 사용하는 새 매니저를 만든다.
+	// Upstream이 API 키 모드면 사용되지 않는다.
 	AuthManager *auth.Manager
+
+	// Upstream은 forwarding 대상. zero value면 ChatGPT OAuth 모드 (기존 동작).
+	Upstream UpstreamConfig
 
 	// IdleTimeout이 0보다 크면 마지막 요청 후 이 시간 동안 추가 요청이 없으면 종료한다.
 	// 데몬이 부모 프로세스 사망 감지를 놓쳤을 때의 안전장치.
@@ -42,6 +46,7 @@ type Server struct {
 	httpSrv      *http.Server
 	listener     net.Listener
 	mgr          *auth.Manager
+	upstream     UpstreamConfig
 	sharedSecret string
 	lastActive   atomic.Int64 // unix nanos
 	stop         chan struct{}
@@ -60,13 +65,14 @@ func Start(opts ServerOptions) (*Server, error) {
 		listener = l
 	}
 	mgr := opts.AuthManager
-	if mgr == nil {
+	if mgr == nil && !opts.Upstream.APIKeyMode() {
 		mgr = auth.NewManager()
 	}
 
 	s := &Server{
 		listener:     listener,
 		mgr:          mgr,
+		upstream:     opts.Upstream,
 		sharedSecret: opts.SharedSecret,
 		stop:         make(chan struct{}),
 		idleTimeout:  opts.IdleTimeout,
@@ -218,9 +224,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := Forward(r.Context(), s.mgr, codexReq, ForwardOptions{SessionID: sessionID})
+	upstream, err := Forward(r.Context(), s.mgr, s.upstream, codexReq, ForwardOptions{SessionID: sessionID})
 	if err != nil {
-		surfaceForwardError(w, err)
+		s.surfaceForwardError(w, err)
 		return
 	}
 	defer upstream.Close()
@@ -266,7 +272,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 // surfaceForwardError는 Forward()의 에러를 적절한 HTTP 응답으로 변환.
-func surfaceForwardError(w http.ResponseWriter, err error) {
+func (s *Server) surfaceForwardError(w http.ResponseWriter, err error) {
 	var fe *ForwardError
 	if errors.As(err, &fe) {
 		switch fe.Status {
@@ -277,10 +283,18 @@ func surfaceForwardError(w http.ResponseWriter, err error) {
 			writeJSONError(w, http.StatusTooManyRequests, "rate_limit_error", "upstream rate limited: "+fe.Detail)
 			return
 		case 401:
-			writeJSONError(w, http.StatusUnauthorized, "authentication_error", "Codex authentication failed — run `ccx codex login` again")
+			if s.upstream.APIKeyMode() {
+				writeJSONError(w, http.StatusUnauthorized, "authentication_error", "OpenAI API authentication failed — check the profile's apiKey: "+fe.Detail)
+			} else {
+				writeJSONError(w, http.StatusUnauthorized, "authentication_error", "Codex authentication failed — run `ccx codex login` again")
+			}
 			return
 		case 403:
-			writeJSONError(w, http.StatusForbidden, "permission_error", "Codex access denied: "+fe.Detail)
+			if s.upstream.APIKeyMode() {
+				writeJSONError(w, http.StatusForbidden, "permission_error", "OpenAI API access denied — check model/project permissions: "+fe.Detail)
+			} else {
+				writeJSONError(w, http.StatusForbidden, "permission_error", "Codex access denied: "+fe.Detail)
+			}
 			return
 		}
 		writeJSONError(w, http.StatusBadGateway, "api_error", fmt.Sprintf("upstream %d: %s", fe.Status, fe.Detail))

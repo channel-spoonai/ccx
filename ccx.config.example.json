@@ -93,6 +93,17 @@
       "env": {
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000"
       }
+    },
+    {
+      "name": "OpenAI API",
+      "description": "OpenAI Responses API with your API key — full 1M context on GPT-5.6 (no 272K cap)",
+      "auth": "openai-responses",
+      "apiKey": "env:OPENAI_API_KEY",
+      "models": {
+        "opus": "gpt-5.6-sol[1m]",
+        "sonnet": "gpt-5.6-terra[1m]",
+        "haiku": "gpt-5.6-luna"
+      }
     }
   ]
 }

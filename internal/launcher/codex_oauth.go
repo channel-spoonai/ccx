@@ -33,7 +33,7 @@ func prepareCodexOAuth(p *config.Profile) (*config.Profile, error) {
 
 	// 2) 자식 프록시 데몬 spawn. 부모가 syscall.Exec(claude)로 사라져도 자식은 ppid polling으로
 	//    claude 종료를 감지해 자체 종료한다.
-	sd, err := proxy.SpawnDaemon(5 * time.Second)
+	sd, err := proxy.SpawnDaemon(proxy.SpawnInput{}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn Codex proxy: %w", err)
 	}

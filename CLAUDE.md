@@ -54,7 +54,7 @@ node ccx.mjs -xSet "GLM Coding Plan" -p "hello"      # 프로파일 직접 지�
 
 ## Supported Providers
 
-ccx는 Claude Code를 재사용하기 때문에 **Anthropic 호환 엔드포인트(`/v1/messages`)를 제공하는 프로바이더만** 지원한다. 별도 SDK나 변환 로직은 없다. 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.
+ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔드포인트(`/v1/messages`)를 그대로 사용**한다. Anthropic 엔드포인트가 없는 업스트림은 내장 변환 프록시로 지원한다 — `auth: "openai-chat"`(Chat Completions), `auth: "codex-oauth"`(ChatGPT Responses), `auth: "openai-responses"`(OpenAI API Responses). 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.
 
 | Provider | baseUrl | Auth 필드 | 비고 |
 |---|---|---|---|
@@ -65,6 +65,7 @@ ccx는 Claude Code를 재사용하기 때문에 **Anthropic 호환 엔드포인�
 | OpenRouter | `https://openrouter.ai/api` | `apiKey` | openrouter.ai/docs — Claude Code가 `/v1/messages`를 자동 append하므로 `/v1` 없이 지정. 모델 ID는 `provider/model[:tag]` 형식 (예: `google/gemma-2-9b-it:free`) |
 | LM Studio (로컬) | `http://localhost:1234` | `authToken: "lmstudio"` (더미, 선택) | lmstudio.ai/docs/developer/anthropic-compat, v0.4.1+ 필요 |
 | Lightning-MLX (로컬) | `http://127.0.0.1:<port>` | `authToken` (더미, 선택) | `auth: "openai-chat"` 디스크리미네이터 사용 — ccx가 OpenAI Chat Completions 변환 프록시를 띄워 라우팅. 모델 ID는 `/v1/models` 응답값(서버 기본 `local`) |
+| OpenAI API | (자동 — 기본 `api.openai.com/v1/responses`) | `apiKey` | `auth: "openai-responses"` 디스크리미네이터 — codex 변환 프록시를 API 키 모드로 재사용. GPT-5.6 전체 1M 컨텍스트 (272K 캡 없음) |
 
 **로컬 프로바이더 주의사항**: 모델 ID는 LM Studio/Lightning-MLX에 실제 로드된 식별자여야 한다(예: LM Studio `ibm/granite-4-micro`, Lightning-MLX `local`). Claude Code가 기대하는 툴 사용/캐시 제어 동작을 로컬 모델이 완전히 지원하지 않을 수 있다.
 
@@ -108,13 +109,13 @@ ccx -xSet "Codex"                # 라우팅 시작
 
 프로파일은 `auth: "codex-oauth"` 디스크리미네이터만 두고 baseUrl/authToken은 비워둔다 — ccx가 자동으로 로컬 프록시(랜덤 포트)를 띄우고 채워준다.
 
-모델 ID는 프록시에서 `[1m]`/`[200k]` 컨텍스트 suffix만 제거하고 그대로 업스트림에 패스스루된다 — 허용 목록이 없어 새 모델은 config 갱신만으로 사용 가능. 카탈로그 기본값은 GPT-5.6 패밀리(opus→`gpt-5.6-sol`, sonnet→`gpt-5.6-terra`, haiku→`gpt-5.6-luna`). ChatGPT 구독의 GPT-5.6 컨텍스트 창은 272K라 카탈로그 프로파일 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`을 포함한다. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있음(그 경우 `gpt-5.6-terra`로 대체).
+모델 ID는 프록시에서 `[1m]`/`[200k]` 컨텍스트 suffix만 제거하고 그대로 업스트림에 패스스루된다 — 허용 목록이 없어 새 모델은 config 갱신만으로 사용 가능. 카탈로그 기본값은 GPT-5.6 패밀리(opus→`gpt-5.6-sol`, sonnet→`gpt-5.6-terra`, haiku→`gpt-5.6-luna`). **ChatGPT 백엔드는 컨텍스트를 272K로 캡**하므로(모델의 API 스펙이 1M이어도, openai/codex#32806 참고) 카탈로그 프로파일 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000`을 포함한다 — 이건 버그가 아니라 백엔드 실측 한도. 전체 1M 컨텍스트는 `auth: "openai-responses"`(API 키) 경로에서만 가능. `gpt-5.6-sol`은 일부 ChatGPT 플랜에서 거부될 수 있음(그 경우 `gpt-5.6-terra`로 대체).
 
 **아키텍처**:
 - `internal/auth/codex/` — PKCE/디바이스 코드 OAuth 클라이언트, 토큰 저장(`~/.config/ccx/auth/codex.json` mode 0600), 자동 refresh
 - `internal/translate/codex/` — Anthropic Messages ↔ OpenAI Responses 변환 + SSE 스트리밍
 - `internal/proxy/codex/` — 로컬 HTTP 프록시 + self-respawn 데몬 (`__codex-proxy` hidden 서브명령)
-- 부모 ccx → `SpawnDaemon` (자식이 ready 메시지로 포트 보고) → `syscall.Exec(claude)` 로 PID 보존 전환 → 자식이 부모 PID(=claude) polling으로 종료 감지
+- 부모 ccx → `SpawnDaemon` (자식이 ready 메시지로 포트 보고) → `syscall.Exec(claude)` 로 PID 보존 전환 → 자식이 부모 PID(=claude) polling으로 종료 감지 (생존 판정은 `internal/procutil` — unix는 signal 0, Windows는 OpenProcess+WaitForSingleObject; Windows에 signal 0을 쓰면 항상 살아있다고 오판해 데몬이 누수된다)
 
 **OAuth 파라미터**(`internal/auth/codex/constants.go`): client_id `app_EMoamEEZ73f0CkXaXp7hrann`, originator `claude-code-proxy` — OpenAI가 식별하는 값이라 변경 시 즉시 차단될 수 있어 의도적으로 raine/claude-code-proxy 구현체와 동일하게 유지.
 
@@ -124,6 +125,24 @@ ccx -xSet "Codex"                # 라우팅 시작
 - tool_result 내 이미지는 `[image omitted]` 플레이스홀더로 치환 (Codex 백엔드가 거부)
 - prompt caching, computer-use 같은 Anthropic 전용 기능은 strip됨
 - 토큰 카운트는 정확한 토크나이저 없이 chars/4 휴리스틱 — 한국어/CJK는 underestimate 가능
+
+### OpenAI API 키 프로바이더: `auth: "openai-responses"`
+
+ChatGPT 구독 대신 종량제 OpenAI API 키로 같은 변환 경로를 쓴다. codex 프록시를 API 키 모드로 재사용 — `internal/proxy/codex`의 `UpstreamConfig{Endpoint, APIKey}`가 zero value면 ChatGPT OAuth 모드, APIKey가 있으면 `Authorization: Bearer <key>`만 보내고 ChatGPT 전용 헤더(originator, ChatGPT-Account-Id, session 트로이카)와 OAuth refresh를 생략한다.
+
+```json
+{
+  "name": "OpenAI API",
+  "auth": "openai-responses",
+  "apiKey": "env:OPENAI_API_KEY",
+  "models": { "opus": "gpt-5.6-sol[1m]", "sonnet": "gpt-5.6-terra[1m]", "haiku": "gpt-5.6-luna" }
+}
+```
+
+- `apiKey`는 리터럴 키 또는 `env:VAR` 참조 (`ResolveSecret`), 비어있으면 `authToken` fallback
+- `baseUrl`은 호환 게이트웨이 오버라이드 용 — `/responses`로 끝나면 그대로, `/v1`로 끝나면 `/responses`만, 그 외에는 `/v1/responses`를 붙임. `env:` 참조가 미해석이면 조용한 폴백 대신 에러 (`internal/launcher/openai_responses.go`)
+- ChatGPT 백엔드의 272K 캡이 없어 GPT-5.6의 1M+ 컨텍스트를 그대로 사용. 단 272K 초과 입력은 long-context 요율(입력 2배/출력 1.5배) 과금 — 절약하려면 `env`에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=272000` 추가
+- 데몬 전달 환경변수: `CCX_CODEX_UPSTREAM_URL` / `CCX_CODEX_UPSTREAM_APIKEY` (`internal/proxy/codex/spawn.go`)
 
 ## Installation
 

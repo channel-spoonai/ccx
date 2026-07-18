@@ -23,6 +23,19 @@ const CCXProxySecretEnv = "CCX_PROXY_SECRET"
 // CCXProxyParentPIDEnv는 자식 데몬이 polling할 부모 PID.
 const CCXProxyParentPIDEnv = "CCX_PROXY_PPID"
 
+// CCXUpstreamURLEnv / CCXUpstreamAPIKeyEnv는 API 키 모드에서 부모가 자식 데몬에
+// upstream 엔드포인트와 키를 전달하는 환경변수. 미설정이면 ChatGPT OAuth 모드.
+const (
+	CCXUpstreamURLEnv    = "CCX_CODEX_UPSTREAM_URL"
+	CCXUpstreamAPIKeyEnv = "CCX_CODEX_UPSTREAM_APIKEY"
+)
+
+// SpawnInput은 부모가 SpawnDaemon에 전달하는 정보.
+type SpawnInput struct {
+	// Upstream이 zero value면 기존 ChatGPT OAuth 모드.
+	Upstream UpstreamConfig
+}
+
 // SpawnedDaemon는 부모가 자식 데몬을 spawn했을 때 핸들.
 type SpawnedDaemon struct {
 	Process      *os.Process
@@ -36,11 +49,12 @@ func (s *SpawnedDaemon) Address() string {
 }
 
 // SpawnDaemon은 ccx 자기 자신을 자식 프로세스로 fork한 뒤 ready 메시지를 받아
-// SpawnedDaemon 핸들을 반환한다. 부모는 이후 syscall.Exec(claude)로 전환할 수 있다 —
-// PID는 보존되므로 자식의 ppid polling이 자연스럽게 claude를 watch한다.
+// SpawnedDaemon 핸들을 반환한다. unix에서는 부모가 이후 syscall.Exec(claude)로 전환하며
+// PID가 보존되므로 자식의 ppid polling이 자연스럽게 claude를 watch한다.
+// (Windows는 부모=ccx가 남아 claude를 자식으로 대기 — daemon.go의 ParentPID 주석 참고)
 //
 // readyTimeout 안에 자식이 "ready <port>\n" 을 출력하지 못하면 자식을 죽이고 에러.
-func SpawnDaemon(readyTimeout time.Duration) (*SpawnedDaemon, error) {
+func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up self path: %w", err)
@@ -51,9 +65,14 @@ func SpawnDaemon(readyTimeout time.Duration) (*SpawnedDaemon, error) {
 	}
 
 	cmd := exec.Command(self, DaemonSubcommand)
+	// upstream 값은 빈 값이어도 항상 append한다 — exec.Cmd의 중복 키 last-wins 규칙으로
+	// 부모 환경에 잔존하는 CCX_CODEX_UPSTREAM_* (디버깅 export 등)가 자식 모드를
+	// 오염시키지 못하게 확실히 덮어쓴다. (openaichat/spawn.go와 동일 패턴)
 	cmd.Env = append(os.Environ(),
 		CCXProxySecretEnv+"="+secret,
 		CCXProxyParentPIDEnv+"="+strconv.Itoa(os.Getpid()),
+		CCXUpstreamURLEnv+"="+in.Upstream.Endpoint,
+		CCXUpstreamAPIKeyEnv+"="+in.Upstream.APIKey,
 	)
 	// 자식 stderr는 부모로 그대로 흘려서 디버그 메시지가 잡히도록 함.
 	cmd.Stderr = os.Stderr

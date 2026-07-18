@@ -54,34 +54,67 @@ type ForwardOptions struct {
 	SessionID string
 }
 
-// Forward는 변환된 ResponsesRequest 를 Codex로 POST하고 응답 body 스트림을 돌려준다.
+// UpstreamConfig는 forwarding 대상 설정. zero value는 기존 ChatGPT OAuth 모드.
+type UpstreamConfig struct {
+	// Endpoint가 비어있으면 auth.CodexAPIEndpoint (ChatGPT 백엔드).
+	// API 키 모드에서는 보통 https://api.openai.com/v1/responses.
+	Endpoint string
+
+	// APIKey가 비어있지 않으면 OpenAI API 키 모드 — OAuth 토큰 매니저와
+	// ChatGPT 전용 헤더(originator, ChatGPT-Account-Id, session 트로이카) 대신
+	// Authorization: Bearer <key> 만 보낸다.
+	APIKey string
+}
+
+func (u UpstreamConfig) endpoint() string {
+	if u.Endpoint != "" {
+		return u.Endpoint
+	}
+	return auth.CodexAPIEndpoint
+}
+
+// APIKeyMode는 정적 API 키 인증을 쓰는지 여부.
+func (u UpstreamConfig) APIKeyMode() bool { return u.APIKey != "" }
+
+// Forward는 변환된 ResponsesRequest 를 upstream으로 POST하고 응답 body 스트림을 돌려준다.
 //
-// 401 응답은 토큰 만료를 의미하므로 한 번에 한해 강제 refresh 후 재시도한다.
+// OAuth 모드에서 401 응답은 토큰 만료를 의미하므로 한 번에 한해 강제 refresh 후 재시도한다.
+// API 키 모드의 401은 재시도 없이 그대로 전달 (키가 잘못된 것 — refresh 개념이 없다).
 // 429/403 등 다른 에러는 ForwardError로 감싸 호출자에게 전달.
 func Forward(
 	ctx context.Context,
 	mgr *auth.Manager,
+	upstream UpstreamConfig,
 	body *tr.ResponsesRequest,
 	opts ForwardOptions,
 ) (io.ReadCloser, error) {
-	auth1, err := mgr.Snapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := doForward(ctx, auth1, body, opts)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode == 401 {
-		// 만료 직전에 캐시가 fresh로 판정될 수 있어 한 번에 한해 강제 refresh.
-		_ = resp.Body.Close()
-		auth2, refErr := mgr.ForceRefresh(ctx)
-		if refErr != nil {
-			return nil, fmt.Errorf("token refresh after 401 failed: %w", refErr)
-		}
-		resp, err = doForward(ctx, auth2, body, opts)
+	var resp *http.Response
+	if upstream.APIKeyMode() {
+		var err error
+		resp, err = doForward(ctx, upstream, nil, body, opts)
 		if err != nil {
 			return nil, err
+		}
+	} else {
+		auth1, err := mgr.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err = doForward(ctx, upstream, auth1, body, opts)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == 401 {
+			// 만료 직전에 캐시가 fresh로 판정될 수 있어 한 번에 한해 강제 refresh.
+			_ = resp.Body.Close()
+			auth2, refErr := mgr.ForceRefresh(ctx)
+			if refErr != nil {
+				return nil, fmt.Errorf("token refresh after 401 failed: %w", refErr)
+			}
+			resp, err = doForward(ctx, upstream, auth2, body, opts)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -102,7 +135,8 @@ func Forward(
 
 func doForward(
 	ctx context.Context,
-	auth1 *auth.StoredAuth,
+	upstream UpstreamConfig,
+	oauth *auth.StoredAuth,
 	body *tr.ResponsesRequest,
 	opts ForwardOptions,
 ) (*http.Response, error) {
@@ -110,24 +144,29 @@ func doForward(
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", auth.CodexAPIEndpoint, bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, "POST", upstream.endpoint(), bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+auth1.AccessToken)
-	req.Header.Set("originator", auth.Originator)
-	req.Header.Set("openai-beta", "responses=experimental")
 	req.Header.Set("User-Agent", upstreamVersion)
-	if auth1.AccountID != "" {
-		req.Header.Set("ChatGPT-Account-Id", auth1.AccountID)
-	}
-	if opts.SessionID != "" {
-		// 세션 일관성을 위해 raine과 동일한 헤더 트로이카를 보낸다.
-		req.Header.Set("session_id", opts.SessionID)
-		req.Header.Set("x-client-request-id", opts.SessionID)
-		req.Header.Set("x-codex-window-id", opts.SessionID+":0")
+	if upstream.APIKeyMode() {
+		req.Header.Set("Authorization", "Bearer "+upstream.APIKey)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+oauth.AccessToken)
+		req.Header.Set("originator", auth.Originator)
+		req.Header.Set("openai-beta", "responses=experimental")
+		if oauth.AccountID != "" {
+			req.Header.Set("ChatGPT-Account-Id", oauth.AccountID)
+		}
+		if opts.SessionID != "" {
+			// 세션 일관성을 위해 raine과 동일한 헤더 트로이카를 보낸다.
+			// ChatGPT 백엔드 전용 — 공식 API에는 보내지 않는다.
+			req.Header.Set("session_id", opts.SessionID)
+			req.Header.Set("x-client-request-id", opts.SessionID)
+			req.Header.Set("x-codex-window-id", opts.SessionID+":0")
+		}
 	}
 
 	if debugEnabled() {
@@ -136,12 +175,12 @@ func doForward(
 			effort = body.Reasoning.Effort
 		}
 		fmt.Fprintf(os.Stderr, "[ccx codex-proxy] POST %s model=%s effort=%s input_items=%d tools=%d session=%q\n",
-			auth.CodexAPIEndpoint, body.Model, effort, len(body.Input), len(body.Tools), opts.SessionID)
+			upstream.endpoint(), body.Model, effort, len(body.Input), len(body.Tools), opts.SessionID)
 	}
 
 	resp, err := upstreamClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Codex API request failed: %w", err)
+		return nil, fmt.Errorf("upstream request failed: %w", err)
 	}
 	if debugEnabled() {
 		fmt.Fprintf(os.Stderr, "[ccx codex-proxy] upstream status=%d\n", resp.StatusCode)
