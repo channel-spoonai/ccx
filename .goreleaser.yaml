@@ -1,13 +1,11 @@
-# goreleaser v2 — v* 태그 push 시 GitHub Actions(.github/workflows/release.yml)가 실행.
-# 아카이브 명명은 install.sh/install.ps1/internal/update(release.go)와 계약:
-#   ccx-{버전(v 없이)}-{os}-{arch}.tar.gz (windows는 .zip), 바이너리는 아카이브 루트의 ccx
 version: 2
 
 project_name: ccx
 
 before:
   hooks:
-    # 임베드용 example 사본을 정본과 동기화 (build.sh와 동일)
+    - go mod tidy
+    # 임베드용 example 사본을 정본과 동기화 (build.sh와 동일한 계약)
     - cp ccx.config.example.json internal/config/ccx.config.example.json
 
 builds:
@@ -16,6 +14,10 @@ builds:
     binary: ccx
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
     goos:
       - darwin
       - linux
@@ -26,24 +28,25 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }}
 
 archives:
-  - id: ccx
+  - id: default
     name_template: "ccx-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
-    # 바이너리만 포함 — 설치 스크립트와 자동 업데이터가 아카이브 루트의 ccx를 기대
     files:
-      - none*
+      - README.md
+      - CLAUDE.md
+      - ccx.config.example.json
+      - install.sh
 
 checksum:
   name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -51,3 +54,25 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    ## Install
+
+    **macOS / Linux**
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.sh | bash
+    ```
+
+    **Windows (PowerShell)**
+    ```powershell
+    irm https://raw.githubusercontent.com/channel-spoonai/ccx/main/install.ps1 | iex
+    ```
+
+    수동 설치는 아래 Assets에서 OS/아키텍처에 맞는 아카이브를 받으세요.
