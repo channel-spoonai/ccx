@@ -1,3 +1,7 @@
 node_modules/
 claudex.config.json
 apikey.md
+ccx.config.json
+.env
+dist/
+/ccx/

@@ -1,0 +1,53 @@
+# goreleaser v2 — v* 태그 push 시 GitHub Actions(.github/workflows/release.yml)가 실행.
+# 아카이브 명명은 install.sh/install.ps1/internal/update(release.go)와 계약:
+#   ccx-{버전(v 없이)}-{os}-{arch}.tar.gz (windows는 .zip), 바이너리는 아카이브 루트의 ccx
+version: 2
+
+project_name: ccx
+
+before:
+  hooks:
+    # 임베드용 example 사본을 정본과 동기화 (build.sh와 동일)
+    - cp ccx.config.example.json internal/config/ccx.config.example.json
+
+builds:
+  - id: ccx
+    main: ./cmd/ccx
+    binary: ccx
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }}
+
+archives:
+  - id: ccx
+    name_template: "ccx-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # 바이너리만 포함 — 설치 스크립트와 자동 업데이터가 아카이브 루트의 ccx를 기대
+    files:
+      - none*
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
