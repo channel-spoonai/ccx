@@ -65,13 +65,14 @@ ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔
 | OpenRouter | `https://openrouter.ai/api` | `apiKey` | openrouter.ai/docs — Claude Code가 `/v1/messages`를 자동 append하므로 `/v1` 없이 지정. 모델 ID는 `provider/model[:tag]` 형식 (예: `google/gemma-2-9b-it:free`) |
 | LM Studio (로컬) | `http://localhost:1234` | `authToken: "lmstudio"` (더미, 선택) | lmstudio.ai/docs/developer/anthropic-compat, v0.4.1+ 필요 |
 | Lightning-MLX (로컬) | `http://127.0.0.1:<port>` | `authToken` (더미, 선택) | `auth: "openai-chat"` 디스크리미네이터 사용 — ccx가 OpenAI Chat Completions 변환 프록시를 띄워 라우팅. 모델 ID는 `/v1/models` 응답값(서버 기본 `local`) |
+| NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `authToken` (`nvapi-...`) | `auth: "openai-chat"` — build.nvidia.com 호스팅 오픈웨이트 100+지만 등록 메뉴에는 allowlist 6종만 노출. 무료 티어는 **계정 단위**(≈1000 크레딧, ≈40 RPM)이고 모델별 free/paid 구분은 존재하지 않는다. `/v1/models`는 무인증 200이지만 `id`/`owned_by`만 주므로 컨텍스트는 `catalog.go` 담당 |
 | OpenAI API | (자동 — 기본 `api.openai.com/v1/responses`) | `apiKey` | `auth: "openai-responses"` 디스크리미네이터 — codex 변환 프록시를 API 키 모드로 재사용. GPT-5.6 전체 1M 컨텍스트 (272K 캡 없음) |
 
 **로컬 프로바이더 주의사항**: 모델 ID는 LM Studio/Lightning-MLX에 실제 로드된 식별자여야 한다(예: LM Studio `ibm/granite-4-micro`, Lightning-MLX `local`). Claude Code가 기대하는 툴 사용/캐시 제어 동작을 로컬 모델이 완전히 지원하지 않을 수 있다.
 
 ### OpenAI Chat Completions 변환 프로바이더: `auth: "openai-chat"`
 
-OpenAI 호환 `/v1/chat/completions` 엔드포인트만 노출하고 Anthropic `/v1/messages`는 지원하지 않거나, Anthropic 엔드포인트가 있어도 streaming 사양이 Claude Code와 충돌하는 서버를 위해 ccx 내장 변환 프록시를 사용한다. lightning-mlx, vLLM, LocalAI, 일부 OpenRouter 모델 등에 활용.
+OpenAI 호환 `/v1/chat/completions` 엔드포인트만 노출하고 Anthropic `/v1/messages`는 지원하지 않거나, Anthropic 엔드포인트가 있어도 streaming 사양이 Claude Code와 충돌하는 서버를 위해 ccx 내장 변환 프록시를 사용한다. lightning-mlx, NVIDIA NIM, vLLM, LocalAI, 일부 OpenRouter 모델 등에 활용.
 
 ```json
 {
@@ -90,10 +91,34 @@ OpenAI 호환 `/v1/chat/completions` 엔드포인트만 노출하고 Anthropic `
 
 **enable_thinking 처리**: 디폴트는 `false`. lightning-mlx 같은 Qwen3 reasoning 모델은 streaming 시 `delta.reasoning_content`로 chain-of-thought를 흘리며 동일 token budget을 공유해 실제 응답이 1-2글자만 남는 사양 차이가 있다. Claude Code는 이 비표준 필드를 활용할 수 없으므로 reasoning을 비활성화한다. 사용자가 reasoning을 활성화하려면 `profile.env`에 `"CCX_OPENAICHAT_ENABLE_THINKING": "true"` 추가.
 
+단 **모든 서버가 모르는 필드를 무시하지는 않는다**. NVIDIA NIM은 모델마다 서빙 백엔드가 달라 `nemotron-3-*`/`deepseek-v4-*`/`minimax-m3`는 ``Validation: Unsupported parameter(s): `enable_thinking` ``로 400을 내고 `gpt-oss-*`/`llama-3.1-*`는 통과한다(2026-07 실측). 프로파일 단위 설정으로는 opus만 거부당하는 조합을 다룰 수 없어, `Forward`(forward.go)가 **400 + 본문에 필드명 언급**일 때만 필드를 빼고 1회 재시도하고 그 모델을 `enableThinkingUnsupported`(sync.Map, 데몬 생명주기)에 기록해 이후 요청은 처음부터 제외한다. 다른 400(컨텍스트 초과 등)은 재시도하지 않는다 — 이 구분이 없으면 무의미한 왕복이 두 배가 된다.
+
 **한계 / 위험**:
 - prompt caching (Anthropic 전용) 같은 헤더는 strip됨
 - tool_result 내 이미지는 텍스트 placeholder로 치환 (대부분의 OpenAI 호환 서버는 tool role content를 string만 받음)
 - 토큰 카운트는 chars/4 휴리스틱 — 정확한 토크나이저 없음
+
+**NVIDIA NIM 등록 플로우** (`internal/providers/nvidia.go`): `FetchNVIDIAModels`(무인증으로도 200, 응답은 `id`/`owned_by`뿐), `RecommendedNVIDIAModels`/`FilterRecommended`(**allowlist** — 서버가 주는 102개 중 아래 6개와의 교집합만 노출하고 순서도 이 배열을 따른다), `IsNVIDIA`(프로파일 이름 또는 baseUrl 호스트). flows의 `configureNVIDIAModels`가 이를 엮어 기존 `pickModelTiers`에 넘기고, 교집합이 비면 수동 입력으로 폴백한다.
+
+```
+z-ai/glm-5.2 · minimaxai/minimax-m3 · nvidia/nemotron-3-ultra-550b-a55b
+nvidia/nemotron-3-super-120b-a12b · deepseek-ai/deepseek-v4-flash · deepseek-ai/deepseek-v4-pro
+```
+
+NIM 카탈로그 대부분은 Claude Code의 에이전트 워크로드(툴 콜링 + 긴 컨텍스트)를 감당하지 못하고 임베딩·리랭커·가드레일처럼 애초에 대화형이 아닌 것도 섞여 있어, 휴리스틱 필터 대신 명시적 allowlist를 쓴다. 신규 모델은 이 배열에 추가 후 릴리즈하면 자동 업데이트로 전파된다.
+
+컨텍스트는 `nvidiaContextWindows`가 갖는다. **모델 공식 스펙이 아니라 NIM의 실서빙 한도**이고, 한도 초과 요청에 NIM이 돌려주는 `This model's maximum context length is N tokens` 메시지로 직접 측정한 값이다(2026-07):
+
+| 모델 | NIM 실측 | 모델 공식 스펙 |
+|---|---|---|
+| `z-ai/glm-5.2` | **202,752** | 1M |
+| `minimaxai/minimax-m3` | **524,288** | 1M |
+| `nvidia/nemotron-3-ultra-550b-a55b` | **1,000,000** | 네이티브 262,144 / 확장 1M |
+| `nvidia/nemotron-3-super-120b-a12b` | 1,000,000 | 1M |
+| `deepseek-ai/deepseek-v4-flash` | 1,000,000 | 1M |
+| `deepseek-ai/deepseek-v4-pro` | **262,144** | 1M |
+
+NIM은 모델 카드의 최대치가 아니라 배포 시 `--max-model-len`으로 정한 값을 서빙하므로 스펙 추정이 통하지 않는다(ultra는 NVIDIA 문서 기본값 262,144보다 크게, glm-5.2/deepseek-pro는 스펙보다 작게 서빙). **allowlist에 모델을 추가할 때는 반드시 같은 방법으로 실측할 것** — 1.4M 토큰짜리 더미 프롬프트를 보내면 에러 메시지에 한도가 그대로 나온다. 값이 없으면 Claude Code가 200K로 가정해 202K/262K 모델에서 오버플로가 난다.
 
 ### OAuth 기반 프로바이더: ChatGPT (Codex)
 
@@ -153,7 +178,9 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 `ctxwin.Apply`(Launch 최상단, 4개 auth 경로 공통)가 프로파일 copy의 모델 ID suffix(없으면 `catalog.go`의 정적 수치)를 전달 공식으로 변환한다: W≥1M → `[1m]` / 200K<W<1M → `[1m]`+ACW=W / W==200K → 표기 제거만 / W<200K → ACW=W. **200K<W<1M 구간의 `[1m]`+ACW는 분리 불가능한 짝** — 이 불변식 때문에 (a) ACW 후보에서 제외되는 haiku는 W≥1M일 때만 `[1m]`을 받고(짝 없는 `[1m]`은 1M 과대 인식), (b) 사용자 명시 ACW가 티어 실제 윈도우보다 크면 그 티어의 `[1m]` 부착을 생략한다(200K 추정이 안전). ACW는 전역 단일값이라 opus/sonnet/model 중 min을 채택하고 haiku는 제외(소형 haiku가 세션 전체를 캡하는 것 방지, 대신 배너 경고). codex-oauth는 소스 무관 `min(W, 272000)` 캡. 우선순위: 사용자 명시값(`profile.env` > ambient — BuildEnv의 p.Env 루프가 마지막이라) > 계산값. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
 
-프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min)와 LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백)가 감지값을 `ContextSuffix`로 모델 ID에 박제한다. z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
+프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min), LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백), NVIDIA NIM(`NVIDIAContextWindow` — 아래 실측 테이블)이 감지값을 `ContextSuffix`로 모델 ID에 박제한다. z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
+
+**`CatalogLookup`은 `vendor/model` ID의 벤더 세그먼트를 벗겨 재시도하지 않는다** (한때 넣었다가 되돌림). 같은 모델이라도 호스팅 프로바이더마다 실서빙 한도가 다르기 때문이다 — `deepseek-v4-pro`는 DeepSeek 직결에서 1M이지만 NIM에서는 262,144, `glm-5.2`는 z.ai에서 1M이지만 NIM에서는 202,752다(2026-07 실측). 벤더를 무시하고 매칭하면 조용한 컨텍스트 오버플로가 된다. 프로바이더별 차이는 catalog로 표현할 수 없으므로 NIM은 박제 경로를 쓴다.
 
 ## Installation
 

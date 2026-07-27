@@ -151,7 +151,10 @@ type ChatRequest struct {
 	// 이 플래그로 chain-of-thought("reasoning_content")를 활성화·비활성화한다.
 	// false로 보내면 reasoning을 SKIP하고 content에 토큰 예산을 모두 쓴다 — Claude Code는
 	// Anthropic 자체 thinking 메커니즘을 쓰므로 OpenAI 측 reasoning_content를 알아듣지 못한다.
-	// 이 플래그를 모르는 서버는 무시하므로 안전하게 항상 false로 보낸다.
+	//
+	// 모든 서버가 모르는 필드를 무시하지는 않는다: NVIDIA NIM은 모델에 따라
+	// "Validation: Unsupported parameter(s): `enable_thinking`"으로 400을 낸다.
+	// 그래서 proxy의 Forward가 그 400을 감지해 필드를 빼고 재시도한다.
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 

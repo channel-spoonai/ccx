@@ -2,7 +2,7 @@
 
 [🇺🇸 English](README.md)
 
-Claude Code를 z.ai GLM, Kimi, DeepSeek, MiniMax, OpenRouter, LM Studio, **ChatGPT(Codex 구독)** 같은 다른 LLM 프로바이더로 돌려 쓰는 CLI 래퍼.
+Claude Code를 z.ai GLM, Kimi, DeepSeek, MiniMax, OpenRouter, NVIDIA NIM, LM Studio, **ChatGPT(Codex 구독)** 같은 다른 LLM 프로바이더로 돌려 쓰는 CLI 래퍼.
 
 매번 환경변수를 세팅할 필요 없이, 프로파일을 골라서 `claude`를 실행합니다.
 
@@ -100,7 +100,7 @@ cat src/main.go | ccx -xSet "LM Studio (local)" -p "버그 가능성 짚어줘"
 
 ## 지원 프로바이더
 
-z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · LM Studio (로컬) · ChatGPT (Codex) · OpenAI API
+z.ai GLM · Kimi (Moonshot) · DeepSeek · MiniMax · OpenRouter · NVIDIA NIM · LM Studio (로컬) · ChatGPT (Codex) · OpenAI API
 
 기본 설정은 바이너리에 카탈로그로 임베드되어 있어 손댈 필요가 없습니다. 메뉴에서 추가하고 API 키만 입력하면 동작합니다.
 
@@ -144,12 +144,38 @@ ChatGPT 구독 대신 종량제 OpenAI API를 쓰고 싶다면 `openai-responses
 
 `apiKey`에는 키를 직접 넣거나 `env:변수명` 참조를 쓸 수 있습니다. 과금 주의: 입력이 272K 토큰을 넘는 요청은 OpenAI의 long-context 요율(해당 요청 전체에 입력 2배/출력 1.5배)로 과금됩니다 — 임계값 아래로 유지하고 싶으면 프로파일에 `"env": { "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000" }`을 추가하세요.
 
+### NVIDIA NIM (무료 개발자 티어)
+
+[build.nvidia.com](https://build.nvidia.com/)은 100개가 넘는 오픈웨이트 모델(Nemotron 3, DeepSeek, GLM, Kimi, Llama, gpt-oss 등)을 OpenAI 호환 엔드포인트 하나로 제공합니다. 무료 NVIDIA Developer Program에 가입하면 `nvapi-` 키를 받습니다(크레딧 약 1000개, 분당 약 40요청). 무료 티어는 **계정 단위이지 모델별이 아닙니다** — "무료 모델" 구분 자체가 없고 API도 그런 정보를 노출하지 않습니다.
+
+NVIDIA에는 Anthropic 엔드포인트가 없어 ccx가 내장 `openai-chat` 변환 프록시를 띄웁니다(lightning-mlx와 같은 경로).
+
+```bash
+export NVIDIA_API_KEY=nvapi-...
+ccx -xSet "NVIDIA NIM"
+```
+
+메뉴로 프로파일을 추가하면 ccx가 서버에서 실제 서빙 중인 모델을 확인해 엄선된 목록만 티어별로 고르게 해줍니다:
+
+| 모델 | NIM에서의 컨텍스트 |
+|---|---|
+| `z-ai/glm-5.2` | 202K |
+| `minimaxai/minimax-m3` | 524K |
+| `nvidia/nemotron-3-ultra-550b-a55b` | 1M |
+| `nvidia/nemotron-3-super-120b-a12b` | 1M |
+| `deepseek-ai/deepseek-v4-flash` | 1M |
+| `deepseek-ai/deepseek-v4-pro` | 262K |
+
+나머지 카탈로그는 숨깁니다. 대부분은 Claude Code의 에이전트 워크로드(긴 컨텍스트에서의 툴 콜링)를 감당하지 못하고, 상당수는 애초에 대화형이 아닙니다(임베딩·리랭커·가드레일·리워드·문서파싱). 목록 밖의 모델을 쓰려면 프로파일 `models`에 ID를 직접 적으면 됩니다 — ccx가 아는 건 위 표의 값뿐이므로 `[Nk]` suffix도 함께 적어주세요.
+
+위 컨텍스트 수치는 모델 카드가 아니라 **NIM이 실제로 서빙하는 한도를 직접 측정한 값**입니다. NVIDIA는 자체 `--max-model-len`으로 배포하기 때문에 같은 모델도 프로바이더마다 다릅니다 — GLM-5.2는 z.ai에서 1M이지만 여기서는 202K, DeepSeek V4 Pro는 DeepSeek 직결에서 1M이지만 여기서는 262K입니다. ccx는 프로파일 추가 시 이 실측값을 suffix로 기록하므로 Claude Code가 오버플로 전에 압축합니다.
+
 ## 컨텍스트 윈도우
 
 Claude Code는 모르는 모델 ID의 컨텍스트 윈도우를 200K로 가정합니다. 대부분의 서드파티 모델과 어긋나는 값이라 — 128K 로컬 모델은 컨텍스트 오버플로가 나고, 1M DeepSeek 모델은 절반도 못 씁니다. ccx가 모델별로 이걸 교정합니다:
 
 - **모델 ID에 선언**: 프로파일 `models`에 `[131k]`, `[262k]`, `[1m]` 같은 suffix를 붙이세요 (예: `"sonnet": "kimi-k2.5[262k]"`). ccx가 이 표기를 Claude Code가 실제로 이해하는 형태 — 공식 `[1m]` 마커와 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 캡 — 로 변환하고, 프로바이더에는 suffix가 절대 전달되지 않게 제거합니다.
-- **카탈로그 자동 적용**: 알려진 모델(GLM, Kimi, DeepSeek, MiniMax, GPT-5.5/5.6)은 ccx에 정확한 수치가 내장되어 있어 suffix 없이도 올바른 윈도우가 적용됩니다. 카탈로그의 정확값(예: Kimi 262,144)이 `[262k]` floor 표기보다 정밀하므로, 알려진 모델은 suffix 없이 두는 것이 좋습니다.
+- **카탈로그 자동 적용**: 알려진 모델(GLM, Kimi, DeepSeek, MiniMax, GPT-5.5/5.6, NVIDIA NIM 라인업)은 ccx에 정확한 수치가 내장되어 있어 suffix 없이도 올바른 윈도우가 적용됩니다. 카탈로그의 정확값(예: Kimi 262,144)이 `[262k]` floor 표기보다 정밀하므로, 알려진 모델은 suffix 없이 두는 것이 좋습니다.
 - **추가 시 자동 감지**: 메뉴에서 OpenRouter나 LM Studio 프로파일을 추가하면 ccx가 프로바이더에서 실제 컨텍스트 길이(LM Studio는 실제 로드된 값)를 조회해 suffix로 기록해 줍니다. OpenRouter 주의: 기록값은 모델 공표값과 1순위 프로바이더 값 중 작은 쪽인데, 로드밸런싱이 더 작은 컨텍스트를 서빙하는 하위 프로바이더로 라우팅할 수도 있습니다 — 문제가 되면 더 작은 `[Nk]` suffix를 직접 지정하세요.
 
 실행 배너에 해석 결과가 표시됩니다 (예: `Context: sonnet 262k (suffix) → auto-compact 262144`). 사용자 설정이 항상 우선입니다: 프로파일 `env`나 셸에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`를 직접 지정하면 계산값 대신 그 값이 쓰입니다 (둘 다 지정하면 프로파일 `env`가 최종 적용). 기능을 끄려면 `CCX_CONTEXT_AUTO=0` — 이때도 ccx 전용 `[Nk]` 표기는 모델 ID에서 제거해 요청이 깨지지 않게 하고, 그 외 컨텍스트 설정(Codex 272K 자동 캡 포함)은 일절 적용하지 않습니다.

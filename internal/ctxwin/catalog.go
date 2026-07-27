@@ -7,7 +7,8 @@ import "strings"
 // 이긴다. 모델 ID의 suffix 명시가 항상 카탈로그보다 우선한다.
 // 신규 모델은 여기 추가 후 릴리즈하면 자동 업데이트로 전파된다.
 var catalog = map[string]int{
-	// z.ai GLM — docs.z.ai (4.6에서 128K→200K 확장, 4.5 계열은 128K)
+	// z.ai GLM — docs.z.ai (4.6에서 128K→200K 확장, 4.5 계열은 128K, 5.2는 1M)
+	"glm-5.2": 1_000_000,
 	"glm-4.7": 200_000,
 	"glm-4.6": 200_000,
 	"glm-4.5": 131_072,
@@ -36,6 +37,12 @@ var catalog = map[string]int{
 // 예: "MiniMax-M2-her" → minimax-m2-her(64K)가 minimax-m2(204.8K)를 이긴다.
 // prefix 뒤는 문자열 끝이거나 구분자여야 한다 — "kimi-k30"이 "kimi-k3"에,
 // "GLM-4.5V"가 "glm-4.5"에 매칭되는 오인을 막는다.
+//
+// "vendor/model" 형식(NVIDIA NIM 등)에 대해 벤더 세그먼트를 벗겨 재시도하지는
+// 않는다. 같은 모델이라도 호스팅 프로바이더마다 실서빙 한도가 다르기 때문이다
+// — NIM의 deepseek-v4-pro는 262,144지만 DeepSeek 직결은 1M이라, 벤더를 무시한
+// 매칭은 조용한 컨텍스트 오버플로를 만든다. NIM 경로는 providers 쪽 실측
+// 테이블이 suffix로 박제해 처리한다.
 func CatalogLookup(modelID string) (int, bool) {
 	id := strings.ToLower(strings.TrimSpace(modelID))
 	window, bestLen := 0, -1

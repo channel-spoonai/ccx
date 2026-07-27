@@ -2,6 +2,7 @@ package flows
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 
@@ -72,6 +73,7 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 	existingNames := nameSet(existing)
 	isLM := providers.IsLMStudio(tpl.Name)
 	isOR := providers.IsOpenRouter(&tpl)
+	isNV := providers.IsNVIDIA(&tpl)
 
 	fmt.Println()
 	fmt.Printf("  \x1B[36m[%s]\x1B[0m configuration\n", tpl.Name)
@@ -120,6 +122,8 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 		configureLMStudioModels(&tpl)
 	case isOR:
 		configureOpenRouterModels(&tpl)
+	case isNV:
+		configureNVIDIAModels(&tpl)
 	default:
 		configureAnthropicModels(&tpl)
 	}
@@ -204,6 +208,7 @@ func Edit(loaded *config.Loaded, index int) error {
 	}
 	isLM := providers.IsLMStudio(original.Name)
 	isOR := providers.IsOpenRouter(&original) || providers.IsOpenRouter(&edited)
+	isNV := providers.IsNVIDIA(&original) || providers.IsNVIDIA(&edited)
 
 	menu.ClearScreen()
 	fmt.Println()
@@ -247,6 +252,13 @@ func Edit(loaded *config.Loaded, index int) error {
 		ans, _ := menu.PromptLine("Re-fetch the OpenRouter model list? (y/N)", menu.PromptOptions{})
 		if strings.EqualFold(strings.TrimSpace(ans), "y") {
 			configureOpenRouterModels(&edited)
+		} else {
+			edited.Models = promptModelsManual(edited.Models)
+		}
+	case isNV:
+		ans, _ := menu.PromptLine("Re-fetch the NVIDIA NIM model list? (y/N)", menu.PromptOptions{})
+		if strings.EqualFold(strings.TrimSpace(ans), "y") {
+			configureNVIDIAModels(&edited)
 		} else {
 			edited.Models = promptModelsManual(edited.Models)
 		}
@@ -459,6 +471,59 @@ func configureOpenRouterModels(tpl *config.Profile) {
 			Description: providers.FormatDescription(m),
 			// 감지된 컨텍스트를 suffix로 박제 (모델/1순위 프로바이더 중 작은 값)
 			Payload: m.ID + providers.ContextSuffix(providers.EffectiveContext(m)),
+		})
+	}
+	pickModelTiers(tpl, items)
+}
+
+// configureNVIDIAModels는 NIM의 /v1/models를 조회해 권장 모델과의 교집합에서
+// 티어를 고르게 한다. NIM 응답에는 컨텍스트 정보가 없고, 실서빙 한도가 모델 공식
+// 스펙과도 다르며 프로바이더마다 갈리므로(GLM-5.2: z.ai 1M vs NIM 202K),
+// providers의 실측 테이블 값을 suffix로 박제한다 — OpenRouter/LM Studio와 같은 방식.
+func configureNVIDIAModels(tpl *config.Profile) {
+	base := tpl.BaseURL
+	if base == "" {
+		base = providers.NVIDIABaseURL
+	}
+	fmt.Println()
+	fmt.Printf("  \x1B[36m[ccx]\x1B[0m Fetching NVIDIA NIM model list... \x1B[90m(%s/models)\x1B[0m\n", strings.TrimRight(base, "/"))
+	token := config.ResolveSecret(tpl.AuthToken)
+	if token == "" {
+		token = config.ResolveSecret(tpl.APIKey)
+	}
+	res := providers.FetchNVIDIAModels(base, token)
+	if res.Err != nil || len(res.Models) == 0 {
+		if res.Err != nil {
+			fmt.Printf("  \x1B[33m⚠ fetch failed: %s\x1B[0m\n", res.Err)
+		} else {
+			fmt.Println("  \x1B[33m⚠ Model list is empty.\x1B[0m")
+		}
+		fmt.Println("  \x1B[90mEnter models manually.\x1B[0m")
+		tpl.Models = promptModelsManual(tpl.Models)
+		return
+	}
+
+	// 서버 목록 전체가 아니라 ccx 권장 모델과의 교집합만 보여준다 — 나머지는
+	// Claude Code의 툴 콜링·긴 컨텍스트를 감당하지 못한다.
+	models := providers.FilterRecommended(res.Models)
+	if len(models) == 0 {
+		fmt.Printf("  \x1B[33m⚠ None of the recommended models are available (%d listed by the server).\x1B[0m\n", len(res.Models))
+		fmt.Println("  \x1B[90mEnter models manually.\x1B[0m")
+		tpl.Models = promptModelsManual(tpl.Models)
+		return
+	}
+	fmt.Printf("  \x1B[32m✓\x1B[0m %d recommended models available \x1B[90m(%d others hidden)\x1B[0m\n", len(models), len(res.Models)-len(models))
+
+	items := make([]menu.CatalogItem, 0, len(models))
+	for _, m := range models {
+		desc := ""
+		if w := providers.NVIDIAContextWindow(m.ID); w > 0 {
+			desc = fmt.Sprintf("ctx %dk", int(math.Round(float64(w)/1000)))
+		}
+		items = append(items, menu.CatalogItem{
+			Label:       m.ID,
+			Description: desc,
+			Payload:     m.ID + providers.ContextSuffix(providers.NVIDIAContextWindow(m.ID)),
 		})
 	}
 	pickModelTiers(tpl, items)

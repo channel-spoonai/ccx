@@ -14,11 +14,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	tr "github.com/channel-spoonai/ccx/internal/translate/openaichat"
 )
@@ -47,11 +49,56 @@ type ForwardOptions struct {
 	UpstreamAPIKey  string // x-api-key 또는 OpenAI 호환의 Bearer. authToken과 상호 배타.
 }
 
+// enableThinkingUnsupported는 upstream이 enable_thinking을 400으로 거부한 모델 집합.
+// NVIDIA NIM은 같은 엔드포인트라도 모델마다 서빙 백엔드가 달라 수용 여부가 갈린다
+// (gpt-oss는 통과, nemotron-3/deepseek-v4/minimax-m3는 "Validation: Unsupported
+// parameter(s)"로 400). 프로파일 단위 설정으로는 opus만 거부당하는 조합을 다룰 수
+// 없어 모델 단위로 기억한다. 데몬 프로세스 생명주기 동안만 유지.
+var enableThinkingUnsupported sync.Map // model(string) → struct{}
+
 // Forward는 변환된 ChatRequest를 upstream으로 POST하고 응답 body 스트림을 돌려준다.
 //
 // 401은 재시도하지 않는다 — OAuth가 아니라 정적 토큰이므로 한 번 401이면 사용자가
-// profile을 고쳐야 한다.
+// profile을 고쳐야 한다. 반면 enable_thinking(비표준 확장) 때문에 400이 나면 그
+// 필드만 빼고 한 번 재시도한다 — 엄격한 업스트림에서도 요청이 통과해야 하고,
+// 이 플래그가 필요한 lightning-mlx 쪽 동작은 그대로 두어야 하기 때문.
 func Forward(ctx context.Context, body *tr.ChatRequest, opts ForwardOptions) (io.ReadCloser, error) {
+	if body.EnableThinking != nil {
+		if _, bad := enableThinkingUnsupported.Load(body.Model); bad {
+			body = withoutEnableThinking(body)
+		}
+	}
+
+	rc, err := forwardOnce(ctx, body, opts)
+	if err == nil || body.EnableThinking == nil || !rejectsEnableThinking(err) {
+		return rc, err
+	}
+	enableThinkingUnsupported.Store(body.Model, struct{}{})
+	if debugEnabled() {
+		fmt.Fprintf(os.Stderr, "[ccx openaichat-proxy] %s rejected enable_thinking — retrying without it\n", body.Model)
+	}
+	return forwardOnce(ctx, withoutEnableThinking(body), opts)
+}
+
+// withoutEnableThinking은 얕은 복사본에서 플래그만 지운다. 슬라이스 필드는
+// 공유하지만 forwardOnce가 요청 본문을 수정하지 않으므로 안전하다.
+func withoutEnableThinking(body *tr.ChatRequest) *tr.ChatRequest {
+	clone := *body
+	clone.EnableThinking = nil
+	return &clone
+}
+
+// rejectsEnableThinking은 400 + 본문에 필드명이 언급된 경우만 참. 다른 400
+// (잘못된 모델 ID, 컨텍스트 초과 등)을 무의미하게 재시도하지 않기 위함.
+func rejectsEnableThinking(err error) bool {
+	var fe *ForwardError
+	if !errors.As(err, &fe) || fe.Status != http.StatusBadRequest {
+		return false
+	}
+	return strings.Contains(fe.Detail, "enable_thinking")
+}
+
+func forwardOnce(ctx context.Context, body *tr.ChatRequest, opts ForwardOptions) (io.ReadCloser, error) {
 	endpoint, err := chatCompletionsURL(opts.UpstreamBaseURL)
 	if err != nil {
 		return nil, err

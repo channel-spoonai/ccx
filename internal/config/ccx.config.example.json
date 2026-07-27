@@ -82,6 +82,18 @@
       }
     },
     {
+      "name": "NVIDIA NIM",
+      "description": "NVIDIA build.nvidia.com hosted models — OpenAI-compatible, so ccx runs a local translation proxy. Get a key at build.nvidia.com (free developer tier: ~1000 credits, ~40 RPM — it is account-wide, not per model). When adding, ccx offers a curated shortlist (GLM-5.2, MiniMax-M3, Nemotron 3 Ultra/Super, DeepSeek V4 flash/pro) of what the server is actually serving.",
+      "auth": "openai-chat",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "authToken": "env:NVIDIA_API_KEY",
+      "models": {
+        "opus": "",
+        "sonnet": "",
+        "haiku": ""
+      }
+    },
+    {
       "name": "Codex",
       "description": "Route Codex via your ChatGPT Plus/Pro subscription — run `ccx codex login` first. The 272K ChatGPT backend context cap is applied automatically",
       "auth": "codex-oauth",

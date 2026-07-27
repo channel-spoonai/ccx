@@ -26,6 +26,16 @@ func TestCatalogLookup(t *testing.T) {
 		{"kimi-k30", 0, false},
 		{"GLM-4.5V", 0, false},
 		{"gpt-5.55", 0, false},
+
+		{"glm-5.2", 1_000_000, true},
+
+		// "vendor/model" ID는 벤더를 벗겨 매칭하지 않는다 — 같은 모델도 호스팅
+		// 프로바이더마다 실서빙 한도가 달라(NIM의 deepseek-v4-pro는 262,144)
+		// 벤더를 무시하면 조용한 오버플로가 된다. NIM 경로는 providers의 실측
+		// 테이블이 suffix로 박제한다.
+		{"deepseek-ai/deepseek-v4-pro", 0, false},
+		{"z-ai/glm-5.2", 0, false},
+		{"nvidia/nemotron-3-ultra-550b-a55b", 0, false},
 	}
 	for _, c := range cases {
 		w, ok := CatalogLookup(c.id)
