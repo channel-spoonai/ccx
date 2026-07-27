@@ -5,6 +5,8 @@ project_name: ccx
 before:
   hooks:
     - go mod tidy
+    # 임베드용 example 사본을 정본과 동기화 (build.sh와 동일한 계약)
+    - cp ccx.config.example.json internal/config/ccx.config.example.json
 
 builds:
   - id: ccx

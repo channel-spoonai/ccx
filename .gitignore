@@ -1,5 +1,6 @@
 # ── Secrets ─────────────────────────────────────────────────────
 # API 키가 들어 있는 실설정 — 반드시 제외
+ccx.config.json
 claudex.config.json
 apikey.md
 memo.md
