@@ -14,6 +14,7 @@ import (
 	"github.com/channel-spoonai/ccx/internal/launcher"
 	"github.com/channel-spoonai/ccx/internal/menu"
 	proxy "github.com/channel-spoonai/ccx/internal/proxy/codex"
+	openaiproxy "github.com/channel-spoonai/ccx/internal/proxy/openaichat"
 	"github.com/channel-spoonai/ccx/internal/update"
 )
 
@@ -51,13 +52,18 @@ func parseArgs(argv []string) parsedArgs {
 }
 
 func main() {
-	// 이전 `ccx update` 사이클이 남긴 .old 바이너리 잔재를 청소 (Windows 전용 no-op on Unix).
+	// 이전 업데이트 사이클의 잔재 청소: .old-* 바이너리(Windows)와
+	// 중단된 다운로드 임시파일 ccx-dl-*/ccx-new-* (전 플랫폼, mtime 1h 초과분만).
 	update.CleanupStaleBinary()
 
 	// Hidden 서브명령: 자식 데몬 모드. 부모 ccx가 SpawnDaemon으로 자기 자신을 재호출할 때 진입.
 	// 사용자에겐 노출하지 않으므로 help/문서에도 포함시키지 않는다.
 	if proxy.IsDaemonInvocation(os.Args) {
 		runProxyDaemon()
+		return
+	}
+	if openaiproxy.IsDaemonInvocation(os.Args) {
+		runOpenAIChatProxyDaemon()
 		return
 	}
 
@@ -77,6 +83,17 @@ func main() {
 
 	// 24h에 한 번만 GitHub API 호출. 캐시 hit이면 즉시 노출, miss면 백그라운드 fetch만.
 	updateNotice := update.MaybeNotify(version)
+
+	// 캐시가 새 버전을 알고 있으면 알림 대신 자동 적용을 시도한다 (CCX_AUTO_UPDATE=0으로 opt-out).
+	// 실패해도 launch는 계속 — updateNotice가 기존 알림 경로로 폴백.
+	// 서브커맨드/데몬 경로는 위에서 이미 return했으므로 여기 도달하지 않는다.
+	if updateNotice != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), update.AutoApplyTimeout)
+		if update.TryAutoUpdate(ctx, version, updateNotice, os.Stderr) {
+			updateNotice = ""
+		}
+		cancel()
+	}
 
 	loaded, err := config.Load()
 	if err != nil {
@@ -105,6 +122,9 @@ func main() {
 		if updateNotice != "" {
 			fmt.Fprintf(os.Stderr, "[ccx] New version %s available — run `ccx update`\n", updateNotice)
 		}
+		// Unix launch는 syscall.Exec로 프로세스를 교체하므로, 진행 중인 백그라운드
+		// 버전 체크가 캐시를 쓸 때까지 잠깐 기다린다 (미시작/완료면 즉시 통과).
+		update.WaitBackgroundFetch(2 * time.Second)
 		if err := launcher.Launch(profile, args.claudeArgs); err != nil {
 			if errors.Is(err, launcher.ErrClaudeNotFound()) {
 				fmt.Fprintln(os.Stderr, "Error:", err)
@@ -230,6 +250,11 @@ func runProxyDaemon() {
 	err := proxy.RunDaemon(proxy.DaemonOptions{
 		ParentPID:    ppid,
 		SharedSecret: secret,
+		Upstream: proxy.UpstreamConfig{
+			// 미설정이면 zero value → ChatGPT OAuth 모드.
+			Endpoint: os.Getenv(proxy.CCXUpstreamURLEnv),
+			APIKey:   os.Getenv(proxy.CCXUpstreamAPIKeyEnv),
+		},
 		// IdleTimeout 비활성 — 부모 PID polling(1초 간격, ESRCH 감지)이 lifetime을 정확히 관리.
 		// 10분 idle로 자체 종료하면 사용자가 작업 재개 시 ConnectionRefused 발생.
 		IdleTimeout: 0,
@@ -237,6 +262,37 @@ func runProxyDaemon() {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[ccx codex-proxy]", err)
+		os.Exit(1)
+	}
+}
+
+// runOpenAIChatProxyDaemon은 hidden __openai-chat-proxy 서브명령으로 진입했을 때 실행된다.
+// codex 데몬과 동일한 lifetime 모델 — 부모 PID polling으로 종료 감지.
+func runOpenAIChatProxyDaemon() {
+	secret := os.Getenv(openaiproxy.CCXProxySecretEnv)
+	ppid, _ := strconv.Atoi(os.Getenv(openaiproxy.CCXProxyParentPIDEnv))
+	upstreamURL := os.Getenv(openaiproxy.CCXUpstreamURLEnv)
+	upstreamAuth := os.Getenv(openaiproxy.CCXUpstreamAuthEnv)
+	upstreamAPIKey := os.Getenv(openaiproxy.CCXUpstreamAPIKeyEnv)
+
+	var enableThinking *bool
+	if v, ok := os.LookupEnv(openaiproxy.CCXEnableThinkingEnv); ok {
+		b := v == "true" || v == "1"
+		enableThinking = &b
+	}
+
+	err := openaiproxy.RunDaemon(openaiproxy.DaemonOptions{
+		ParentPID:       ppid,
+		SharedSecret:    secret,
+		UpstreamBaseURL: upstreamURL,
+		UpstreamAuth:    upstreamAuth,
+		UpstreamAPIKey:  upstreamAPIKey,
+		EnableThinking:  enableThinking,
+		IdleTimeout:     0,
+		ReadyWriter:     os.Stdout,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[ccx openaichat-proxy]", err)
 		os.Exit(1)
 	}
 }
@@ -255,6 +311,9 @@ func runInteractive(loaded *config.Loaded, claudeArgs []string, updateNotice str
 		switch action.Kind {
 		case menu.ActionLaunch:
 			menu.ExitAltScreen()
+			// syscall.Exec 전에 백그라운드 버전 체크의 캐시 쓰기를 보장 (메뉴 체류 중
+			// 대부분 이미 완료돼 즉시 통과).
+			update.WaitBackgroundFetch(2 * time.Second)
 			if err := launcher.Launch(action.Profile, claudeArgs); err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)
 				os.Exit(1)

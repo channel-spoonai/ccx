@@ -413,9 +413,21 @@ func configureLMStudioModels(tpl *config.Profile) {
 	}
 	fmt.Printf("  \x1B[32m✓\x1B[0m %d models found\n", len(res.Models))
 
+	// 네이티브 API로 로드된 인스턴스의 실할당 컨텍스트를 조회해 suffix로 박제 —
+	// launch 시 ctxwin이 이 표기를 해석해 Claude Code에 전달한다.
+	ctxByModel := providers.FetchLMStudioContexts(tpl.BaseURL, tpl.AuthToken)
+
 	items := make([]menu.CatalogItem, 0, len(res.Models))
 	for _, m := range res.Models {
-		items = append(items, menu.CatalogItem{Label: m, Payload: m})
+		desc := ""
+		if w := ctxByModel[m]; w > 0 {
+			desc = fmt.Sprintf("ctx %d (loaded)", w)
+		}
+		items = append(items, menu.CatalogItem{
+			Label:       m,
+			Description: desc,
+			Payload:     m + providers.ContextSuffix(ctxByModel[m]),
+		})
 	}
 	pickModelTiers(tpl, items)
 }
@@ -445,7 +457,8 @@ func configureOpenRouterModels(tpl *config.Profile) {
 		items = append(items, menu.CatalogItem{
 			Label:       m.ID,
 			Description: providers.FormatDescription(m),
-			Payload:     m.ID,
+			// 감지된 컨텍스트를 suffix로 박제 (모델/1순위 프로바이더 중 작은 값)
+			Payload: m.ID + providers.ContextSuffix(providers.EffectiveContext(m)),
 		})
 	}
 	pickModelTiers(tpl, items)

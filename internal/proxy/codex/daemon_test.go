@@ -58,18 +58,20 @@ func TestRunDaemon_ReadyWriterReceivesPort(t *testing.T) {
 }
 
 func TestRunDaemon_ParentDeathTriggersShutdown(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PID polling assumed unix-only")
-	}
 	withTempHome(t)
 
 	// "곧 죽을 부모"를 만든다 — 짧게 sleep 후 종료하는 자식 프로세스.
-	parent := exec.Command("sleep", "0.3")
+	var parent *exec.Cmd
+	if runtime.GOOS == "windows" {
+		parent = exec.Command("cmd", "/c", "ping -n 1 127.0.0.1 > NUL")
+	} else {
+		parent = exec.Command("sleep", "0.3")
+	}
 	if err := parent.Start(); err != nil {
 		t.Fatal(err)
 	}
 	ppid := parent.Process.Pid
-	// zombie를 reap해야 processAlive가 ESRCH를 받는다 — background wait.
+	// zombie를 reap해야 procutil.Alive가 종료를 감지한다 — background wait.
 	go func() { _ = parent.Wait() }()
 
 	var ready bytes.Buffer
@@ -89,20 +91,6 @@ func TestRunDaemon_ParentDeathTriggersShutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not exit within 5s after parent died")
-	}
-}
-
-func TestProcessAlive(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("processAlive relies on unix signals")
-	}
-	// 자기 자신은 살아있어야 함.
-	if !processAlive(os.Getpid()) {
-		t.Error("processAlive(self) = false")
-	}
-	// 거의 확실히 존재하지 않는 PID.
-	if processAlive(99999999) {
-		t.Error("processAlive(huge pid) = true")
 	}
 }
 

@@ -1,4 +1,4 @@
-package codex
+package openaichat
 
 import (
 	"bufio"
@@ -14,46 +14,41 @@ import (
 )
 
 // DaemonSubcommand는 ccx 자기 자신을 데몬 모드로 다시 실행할 때 사용하는 sentinel 인자.
-// `ccx __codex-proxy ...` 형태로 호출되며 사용자에게 노출되지 않는다.
-const DaemonSubcommand = "__codex-proxy"
+const DaemonSubcommand = "__openai-chat-proxy"
 
-// CCXProxySecretEnv는 부모가 자식 데몬에 shared secret을 전달할 때 쓰는 환경변수 이름.
-const CCXProxySecretEnv = "CCX_PROXY_SECRET"
-
-// CCXProxyParentPIDEnv는 자식 데몬이 polling할 부모 PID.
-const CCXProxyParentPIDEnv = "CCX_PROXY_PPID"
-
-// CCXUpstreamURLEnv / CCXUpstreamAPIKeyEnv는 API 키 모드에서 부모가 자식 데몬에
-// upstream 엔드포인트와 키를 전달하는 환경변수. 미설정이면 ChatGPT OAuth 모드.
+// 환경변수: 부모가 자식 데몬에 설정을 전달할 때 쓰는 키들.
 const (
-	CCXUpstreamURLEnv    = "CCX_CODEX_UPSTREAM_URL"
-	CCXUpstreamAPIKeyEnv = "CCX_CODEX_UPSTREAM_APIKEY"
+	CCXProxySecretEnv      = "CCX_OPENAICHAT_PROXY_SECRET"
+	CCXProxyParentPIDEnv   = "CCX_OPENAICHAT_PROXY_PPID"
+	CCXUpstreamURLEnv      = "CCX_OPENAICHAT_UPSTREAM_URL"
+	CCXUpstreamAuthEnv     = "CCX_OPENAICHAT_UPSTREAM_AUTH"
+	CCXUpstreamAPIKeyEnv   = "CCX_OPENAICHAT_UPSTREAM_APIKEY"
+	CCXEnableThinkingEnv   = "CCX_OPENAICHAT_ENABLE_THINKING" // "true" / "false" — unset이면 필드 미전송
 )
 
 // SpawnInput은 부모가 SpawnDaemon에 전달하는 정보.
 type SpawnInput struct {
-	// Upstream이 zero value면 기존 ChatGPT OAuth 모드.
-	Upstream UpstreamConfig
+	UpstreamBaseURL string
+	UpstreamAuth    string
+	UpstreamAPIKey  string
+
+	// EnableThinking은 nil이면 enable_thinking 필드를 보내지 않고, 값이 있으면 그대로 전달.
+	// lightning-mlx 등 reasoning 모델은 false 권장 — Claude Code는 reasoning_content를 활용 못 함.
+	EnableThinking *bool
 }
 
-// SpawnedDaemon는 부모가 자식 데몬을 spawn했을 때 핸들.
 type SpawnedDaemon struct {
 	Process      *os.Process
 	Port         int
 	SharedSecret string
 }
 
-// Address는 ANTHROPIC_BASE_URL로 쓸 URL.
 func (s *SpawnedDaemon) Address() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", s.Port)
 }
 
-// SpawnDaemon은 ccx 자기 자신을 자식 프로세스로 fork한 뒤 ready 메시지를 받아
-// SpawnedDaemon 핸들을 반환한다. unix에서는 부모가 이후 syscall.Exec(claude)로 전환하며
-// PID가 보존되므로 자식의 ppid polling이 자연스럽게 claude를 watch한다.
-// (Windows는 부모=ccx가 남아 claude를 자식으로 대기 — daemon.go의 ParentPID 주석 참고)
-//
-// readyTimeout 안에 자식이 "ready <port>\n" 을 출력하지 못하면 자식을 죽이고 에러.
+// SpawnDaemon은 ccx 자기 자신을 자식으로 fork한 뒤 ready 메시지를 받아
+// SpawnedDaemon 핸들을 반환한다. 부모는 이후 syscall.Exec(claude)로 전환할 수 있다.
 func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -65,16 +60,20 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 	}
 
 	cmd := exec.Command(self, DaemonSubcommand)
-	// upstream 값은 빈 값이어도 항상 append한다 — exec.Cmd의 중복 키 last-wins 규칙으로
-	// 부모 환경에 잔존하는 CCX_CODEX_UPSTREAM_* (디버깅 export 등)가 자식 모드를
-	// 오염시키지 못하게 확실히 덮어쓴다. (openaichat/spawn.go와 동일 패턴)
 	cmd.Env = append(os.Environ(),
 		CCXProxySecretEnv+"="+secret,
 		CCXProxyParentPIDEnv+"="+strconv.Itoa(os.Getpid()),
-		CCXUpstreamURLEnv+"="+in.Upstream.Endpoint,
-		CCXUpstreamAPIKeyEnv+"="+in.Upstream.APIKey,
+		CCXUpstreamURLEnv+"="+in.UpstreamBaseURL,
+		CCXUpstreamAuthEnv+"="+in.UpstreamAuth,
+		CCXUpstreamAPIKeyEnv+"="+in.UpstreamAPIKey,
 	)
-	// 자식 stderr는 부모로 그대로 흘려서 디버그 메시지가 잡히도록 함.
+	if in.EnableThinking != nil {
+		val := "false"
+		if *in.EnableThinking {
+			val = "true"
+		}
+		cmd.Env = append(cmd.Env, CCXEnableThinkingEnv+"="+val)
+	}
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -85,7 +84,6 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		return nil, fmt.Errorf("failed to spawn child proxy: %w", err)
 	}
 
-	// "ready PORT\n" 한 줄을 timeout 안에 받는다.
 	port, err := readReady(stdout, readyTimeout)
 	if err != nil {
 		_ = cmd.Process.Kill()
@@ -93,12 +91,7 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		return nil, err
 	}
 
-	// ready를 받은 뒤에는 자식 stdout pipe를 닫는다 — 자식은 더 이상 쓰지 않는다.
-	// (자식이 SIGPIPE를 받아도 Go 런타임이 EPIPE로 무시 처리)
 	_ = stdout.Close()
-
-	// 자식을 detach: 부모가 syscall.Exec(claude)로 사라져도 wait 대기가 의미 없으므로
-	// Process는 그대로 두고 Release만 한다.
 	_ = cmd.Process.Release()
 
 	return &SpawnedDaemon{
@@ -122,7 +115,6 @@ func readReady(r interface{ Read(p []byte) (int, error) }, timeout time.Duration
 			return
 		}
 		line = strings.TrimSpace(line)
-		// 형식: "ready <port>"
 		parts := strings.Fields(line)
 		if len(parts) != 2 || parts[0] != "ready" {
 			done <- result{err: fmt.Errorf("malformed child ready message: %q", line)}
@@ -155,7 +147,6 @@ func newSharedSecret() (string, error) {
 }
 
 // IsDaemonInvocation은 os.Args 첫 인자가 hidden 서브명령인지 본다.
-// main.go가 진입 직후 호출해 데몬 코드로 분기.
 func IsDaemonInvocation(args []string) bool {
 	return len(args) >= 2 && args[1] == DaemonSubcommand
 }

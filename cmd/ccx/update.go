@@ -25,7 +25,7 @@ func runUpdateCommand(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if err := update.Apply(ctx, version, os.Stdout); err != nil {
+	if _, err := update.Apply(ctx, version, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "[ccx] update failed:", err)
 		os.Exit(1)
 	}

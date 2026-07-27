@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/ctxwin"
 )
 
 const ClaudeCmd = "claude"
@@ -36,17 +37,9 @@ func BuildEnv(p *config.Profile) []string {
 	return env
 }
 
-// ResolveSecret expands an "env:VAR_NAME" reference into the actual env value
-// so users can keep real keys out of ccx.config.json. Plain values pass
-// through unchanged. Missing variables resolve to "" (same as empty key) —
-// the caller logs a warning via WarnUnresolvedRefs.
-func ResolveSecret(v string) string {
-	const prefix = "env:"
-	if strings.HasPrefix(v, prefix) {
-		return os.Getenv(strings.TrimPrefix(v, prefix))
-	}
-	return v
-}
+// ResolveSecret은 config.ResolveSecret의 얇은 별칭 — 구현이 config 패키지로
+// 이동했다 (ctxwin도 써야 하는데 launcher를 import하면 순환이라서).
+func ResolveSecret(v string) string { return config.ResolveSecret(v) }
 
 // unresolvedEnvRefs returns env-var names referenced by the profile but not
 // set in the current process environment. Used to warn the user before claude
@@ -93,7 +86,7 @@ var errClaudeNotFound = errors.New(`"claude" not found. Is Claude Code installed
 
 func ErrClaudeNotFound() error { return errClaudeNotFound }
 
-func printBanner(p *config.Profile) {
+func printBanner(p *config.Profile, res *ctxwin.Resolution) {
 	fmt.Printf("\x1B[36m[ccx]\x1B[0m Profile: \x1B[1m%s\x1B[0m\n", p.Name)
 	if missing := unresolvedEnvRefs(p); len(missing) > 0 {
 		fmt.Printf("\x1B[33m[ccx]\x1B[0m ⚠ unset environment variables: %s\n", strings.Join(missing, ", "))
@@ -116,5 +109,40 @@ func printBanner(p *config.Profile) {
 			fmt.Printf("\x1B[36m[ccx]\x1B[0m Models: %s\n", strings.Join(parts, ", "))
 		}
 	}
+	printContextLine(res)
 	fmt.Println()
+}
+
+// printContextLine은 ctxwin이 해석한 컨텍스트 윈도우와 주입 결과를 한 줄로 보여준다.
+func printContextLine(res *ctxwin.Resolution) {
+	if res == nil || len(res.Tiers) == 0 {
+		return
+	}
+	var parts []string
+	for _, t := range res.Tiers {
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", t.Label, formatWindow(t.Window), t.Source))
+	}
+	line := strings.Join(parts, ", ")
+	if res.AutoCompact > 0 {
+		line += fmt.Sprintf(" → auto-compact %d", res.AutoCompact)
+	} else if res.UserSet {
+		line += " → auto-compact set by user"
+	}
+	fmt.Printf("\x1B[36m[ccx]\x1B[0m Context: %s\n", line)
+	if res.HaikuBelow > 0 {
+		fmt.Printf("\x1B[33m[ccx]\x1B[0m ⚠ haiku window %s is below the session window — background calls may truncate\n", formatWindow(res.HaikuBelow))
+	}
+}
+
+// formatWindow는 토큰 수를 배너용 짧은 표기로 바꾼다 (262144 → "262k", 1050000 → "1.05m").
+func formatWindow(w int) string {
+	switch {
+	case w >= 1_000_000:
+		s := strings.TrimRight(fmt.Sprintf("%.2f", float64(w)/1_000_000), "0")
+		return strings.TrimSuffix(s, ".") + "m"
+	case w >= 1_000:
+		return fmt.Sprintf("%dk", w/1_000)
+	default:
+		return fmt.Sprintf("%d", w)
+	}
 }

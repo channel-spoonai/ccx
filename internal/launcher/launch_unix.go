@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/ctxwin"
 )
 
 // Launch는 syscall.Exec로 현재 ccx 프로세스를 claude로 교체한다.
@@ -20,19 +21,50 @@ func Launch(p *config.Profile, args []string) error {
 		return errClaudeNotFound
 	}
 
+	// 모델 ID의 컨텍스트 suffix/카탈로그 수치를 Claude Code가 인식하는
+	// 형태([1m] + AUTO_COMPACT_WINDOW)로 정규화 — 4개 auth 경로 공통.
+	p, ctxRes := ctxwin.Apply(p)
+
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)
 		if err != nil {
 			return err
 		}
-		printBanner(prepared)
+		printBanner(prepared, ctxRes)
 		printCodexOAuthBanner(prepared.BaseURL, "")
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
 
+	if p.Auth == AuthOpenAIResponses {
+		endpoint, err := openAIResponsesEndpoint(p)
+		if err != nil {
+			return err
+		}
+		prepared, err := prepareOpenAIResponses(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared, ctxRes)
+		printOpenAIResponsesBanner(prepared.BaseURL, endpoint)
+		argv := append([]string{binary}, args...)
+		return syscall.Exec(binary, argv, BuildEnv(prepared))
+	}
+
+	if p.Auth == AuthOpenAIChat {
+		upstreamURL := ResolveSecret(p.BaseURL)
+		prepared, err := prepareOpenAIChat(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared, ctxRes)
+		printOpenAIChatBanner(prepared.BaseURL, upstreamURL)
+		argv := append([]string{binary}, args...)
+		return syscall.Exec(binary, argv, BuildEnv(prepared))
+	}
+
 	env := BuildEnv(p)
-	printBanner(p)
+	printBanner(p, ctxRes)
 	argv := append([]string{binary}, args...)
 	return syscall.Exec(binary, argv, env)
 }

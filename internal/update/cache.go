@@ -19,6 +19,10 @@ type CacheEntry struct {
 	CheckedAt time.Time `json:"checked_at"`
 	LatestTag string    `json:"latest_tag,omitempty"`
 	LatestURL string    `json:"latest_url,omitempty"`
+	// AutoUpdateFailedTag: 이 태그의 시작 시 자동 업데이트가 실패했음 — 같은 태그는
+	// 자동 재시도하지 않는다 (수동 `ccx update`는 무관). startBackgroundFetch가 24h 후
+	// 캐시를 통째로 덮어쓰면서 자연 소멸 → 재시도는 태그당 24h에 1회.
+	AutoUpdateFailedTag string `json:"auto_update_failed_tag,omitempty"`
 }
 
 // CachePath는 ~/.config/ccx/update-check.json 위치를 반환한다.
@@ -90,6 +94,18 @@ func (e *CacheEntry) Fresh(now time.Time) bool {
 		return false
 	}
 	return now.Sub(e.CheckedAt) < CacheTTL
+}
+
+// markAutoUpdateFailed는 tag의 자동 업데이트 실패를 캐시에 기록한다 (best-effort).
+// 캐시가 없으면(비정상 — 자동 업데이트는 fresh 캐시에서만 트리거됨) 알림이 유지되도록
+// LatestTag를 함께 채워 새로 만든다.
+func markAutoUpdateFailed(tag string) {
+	e := LoadCache()
+	if e == nil {
+		e = &CacheEntry{CheckedAt: time.Now(), LatestTag: tag}
+	}
+	e.AutoUpdateFailedTag = tag
+	_ = SaveCache(*e)
 }
 
 // InvalidateCache는 캐시 파일을 삭제한다 (ccx update 성공 후 호출).

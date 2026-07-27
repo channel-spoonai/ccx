@@ -49,7 +49,7 @@
     },
     {
       "name": "OpenRouter",
-      "description": "OpenRouter multi-model gateway — search and pick models from the server when adding",
+      "description": "OpenRouter multi-model gateway — search and pick models from the server when adding; context length is auto-detected and recorded as a [Nk] suffix",
       "baseUrl": "https://openrouter.ai/api",
       "apiKey": "sk-or-YOUR_KEY_HERE",
       "models": {
@@ -60,7 +60,7 @@
     },
     {
       "name": "LM Studio (local)",
-      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio",
+      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio. Append a [128k]-style suffix (or add via ccx to auto-detect the loaded context) so Claude Code knows the real context window",
       "baseUrl": "http://localhost:1234",
       "authToken": "lmstudio",
       "models": {
@@ -70,13 +70,36 @@
       }
     },
     {
+      "name": "lightning-mlx (local)",
+      "description": "Lightning-MLX local server (Apple Silicon) — ccx runs a local OpenAI Chat Completions translation proxy and forwards to /v1/chat/completions. Replace model ID with the identifier reported by /v1/models (default: `local`). Append a `[128k]`-style context suffix — ccx translates it into Claude Code's context settings and strips it before forwarding upstream.",
+      "auth": "openai-chat",
+      "baseUrl": "http://127.0.0.1:8010",
+      "authToken": "lightning-mlx",
+      "models": {
+        "opus": "local[128k]",
+        "sonnet": "local[128k]",
+        "haiku": "local[128k]"
+      }
+    },
+    {
       "name": "Codex",
-      "description": "Route Codex via your ChatGPT Plus/Pro subscription — run `ccx codex login` first",
+      "description": "Route Codex via your ChatGPT Plus/Pro subscription — run `ccx codex login` first. The 272K ChatGPT backend context cap is applied automatically",
       "auth": "codex-oauth",
       "models": {
-        "opus": "gpt-5.5[1m]",
-        "sonnet": "gpt-5.4[1m]",
-        "haiku": "gpt-5.4-mini"
+        "opus": "gpt-5.6-sol[1m]",
+        "sonnet": "gpt-5.6-terra[1m]",
+        "haiku": "gpt-5.6-luna"
+      }
+    },
+    {
+      "name": "OpenAI API",
+      "description": "OpenAI Responses API with your API key — full 1M context on GPT-5.6 (no 272K cap)",
+      "auth": "openai-responses",
+      "apiKey": "env:OPENAI_API_KEY",
+      "models": {
+        "opus": "gpt-5.6-sol[1m]",
+        "sonnet": "gpt-5.6-terra[1m]",
+        "haiku": "gpt-5.6-luna"
       }
     }
   ]

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // embeddedExample은 빌드 시점에 바이너리에 포함되는 카탈로그 사본.
@@ -229,6 +230,18 @@ func LoadExample() ([]Profile, error) {
 		return nil, err
 	}
 	return cfg.Profiles, nil
+}
+
+// ResolveSecret expands an "env:VAR_NAME" reference into the actual env value
+// so users can keep real keys out of ccx.config.json. Plain values pass
+// through unchanged. Missing variables resolve to "" (same as empty key) —
+// launcher.unresolvedEnvRefs가 launch 배너에서 경고를 출력한다.
+func ResolveSecret(v string) string {
+	const prefix = "env:"
+	if strings.HasPrefix(v, prefix) {
+		return os.Getenv(strings.TrimPrefix(v, prefix))
+	}
+	return v
 }
 
 func FindProfile(profiles []Profile, name string) *Profile {

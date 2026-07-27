@@ -3,6 +3,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -39,12 +40,14 @@ func TestSaveLoadCache(t *testing.T) {
 	}
 
 	// 퍼미션 0600 확인 (Windows는 mode가 다르게 보고됨 — Unix만 검증)
-	info, err := os.Stat(CachePath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		t.Errorf("cache file mode = %o, want 0600 (other bits not set)", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(CachePath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Errorf("cache file mode = %o, want 0600 (other bits not set)", info.Mode().Perm())
+		}
 	}
 }
 
@@ -78,6 +81,41 @@ func TestFresh(t *testing.T) {
 		if got := c.entry.Fresh(now); got != c.want {
 			t.Errorf("Fresh(%v) = %v, want %v", c.entry, got, c.want)
 		}
+	}
+}
+
+func TestAutoUpdateFailedTagRoundTrip(t *testing.T) {
+	withTempCacheDir(t)
+
+	// 기존 캐시가 있으면 다른 필드를 보존한 채 마커만 추가
+	if err := SaveCache(CacheEntry{CheckedAt: time.Now(), LatestTag: "v0.5.0", LatestURL: "url"}); err != nil {
+		t.Fatal(err)
+	}
+	markAutoUpdateFailed("v0.5.0")
+	got := LoadCache()
+	if got == nil || got.AutoUpdateFailedTag != "v0.5.0" {
+		t.Fatalf("marker not persisted: %+v", got)
+	}
+	if got.LatestTag != "v0.5.0" || got.LatestURL != "url" {
+		t.Errorf("existing fields lost: %+v", got)
+	}
+
+	// startBackgroundFetch가 하듯 전체 덮어쓰기하면 마커는 자연 소멸 (24h 백오프 시맨틱)
+	if err := SaveCache(CacheEntry{CheckedAt: time.Now(), LatestTag: "v0.5.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadCache(); got.AutoUpdateFailedTag != "" {
+		t.Errorf("marker should be cleared by full overwrite: %+v", got)
+	}
+}
+
+func TestMarkAutoUpdateFailedNoCache(t *testing.T) {
+	withTempCacheDir(t)
+	// 캐시가 없어도 마커+LatestTag를 담은 항목을 새로 만들어 알림이 유지되게 한다
+	markAutoUpdateFailed("v0.6.0")
+	got := LoadCache()
+	if got == nil || got.AutoUpdateFailedTag != "v0.6.0" || got.LatestTag != "v0.6.0" {
+		t.Errorf("marker entry not created: %+v", got)
 	}
 }
 
