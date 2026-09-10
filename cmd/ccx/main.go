@@ -13,6 +13,7 @@ import (
 	"github.com/channel-spoonai/ccx/internal/flows"
 	"github.com/channel-spoonai/ccx/internal/launcher"
 	"github.com/channel-spoonai/ccx/internal/menu"
+	anthropicproxy "github.com/channel-spoonai/ccx/internal/proxy/anthropic"
 	proxy "github.com/channel-spoonai/ccx/internal/proxy/codex"
 	openaiproxy "github.com/channel-spoonai/ccx/internal/proxy/openaichat"
 	"github.com/channel-spoonai/ccx/internal/update"
@@ -64,6 +65,10 @@ func main() {
 	}
 	if openaiproxy.IsDaemonInvocation(os.Args) {
 		runOpenAIChatProxyDaemon()
+		return
+	}
+	if anthropicproxy.IsDaemonInvocation(os.Args) {
+		runAnthropicProxyDaemon()
 		return
 	}
 
@@ -293,6 +298,28 @@ func runOpenAIChatProxyDaemon() {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[ccx openaichat-proxy]", err)
+		os.Exit(1)
+	}
+}
+
+// runAnthropicProxyDaemon은 hidden __anthropic-proxy 서브명령으로 진입했을 때 실행된다.
+// 다른 두 데몬과 동일한 lifetime 모델 — 부모 PID polling으로 종료를 감지한다.
+func runAnthropicProxyDaemon() {
+	ppid, _ := strconv.Atoi(os.Getenv(anthropicproxy.CCXProxyParentPIDEnv))
+	normalize := os.Getenv(anthropicproxy.CCXNormalizeSystemEnv) != "false"
+
+	err := anthropicproxy.RunDaemon(anthropicproxy.DaemonOptions{
+		ParentPID:       ppid,
+		SharedSecret:    os.Getenv(anthropicproxy.CCXProxySecretEnv),
+		UpstreamBaseURL: os.Getenv(anthropicproxy.CCXUpstreamURLEnv),
+		UpstreamAuth:    os.Getenv(anthropicproxy.CCXUpstreamAuthEnv),
+		UpstreamAPIKey:  os.Getenv(anthropicproxy.CCXUpstreamAPIKeyEnv),
+		NormalizeSystem: normalize,
+		IdleTimeout:     0,
+		ReadyWriter:     os.Stdout,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[ccx anthropic-proxy]", err)
 		os.Exit(1)
 	}
 }

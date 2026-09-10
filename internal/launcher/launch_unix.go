@@ -51,6 +51,19 @@ func Launch(p *config.Profile, args []string) error {
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
 
+	if p.Auth == AuthAnthropic {
+		upstreamURL := ResolveSecret(p.BaseURL)
+		normalize := anthropicNormalizeEnabled(p)
+		prepared, err := prepareAnthropic(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared, ctxRes)
+		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize)
+		argv := append([]string{binary}, args...)
+		return syscall.Exec(binary, argv, BuildEnv(prepared))
+	}
+
 	if p.Auth == AuthOpenAIChat {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		prepared, err := prepareOpenAIChat(p)

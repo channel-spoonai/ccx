@@ -60,13 +60,27 @@
     },
     {
       "name": "LM Studio (local)",
-      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio. Append a [128k]-style suffix (or add via ccx to auto-detect the loaded context) so Claude Code knows the real context window",
+      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio. Append a [128k]-style suffix (or add via ccx to auto-detect the loaded context) so Claude Code knows the real context window. `sessionHeader` makes ccx stamp a per-launch session id so a server that reuses KV state across turns can pin the conversation instead of guessing from the prompt prefix.",
       "baseUrl": "http://localhost:1234",
       "authToken": "lmstudio",
+      "sessionHeader": "x-session-id",
       "models": {
         "opus": "ibm/granite-4-micro",
         "sonnet": "ibm/granite-4-micro",
         "haiku": "ibm/granite-4-micro"
+      }
+    },
+    {
+      "name": "MTPLX / Anthropic-compatible local server",
+      "description": "Local server that already speaks Anthropic /v1/messages. `auth: \"anthropic\"` runs a passthrough proxy (no payload translation) that rewrites Claude Code's mid-conversation `role:\"system\"` messages into `user` messages — Qwen-family chat templates reject a system message that is not first, so the server relocates it and the prompt prefix shifts every turn, forcing a full re-prefill. Pair it with `sessionHeader` so the server can pin the conversation.",
+      "auth": "anthropic",
+      "sessionHeader": "x-session-id",
+      "baseUrl": "http://localhost:8000",
+      "authToken": "local",
+      "models": {
+        "opus": "your-loaded-model-id",
+        "sonnet": "your-loaded-model-id",
+        "haiku": "your-loaded-model-id"
       }
     },
     {

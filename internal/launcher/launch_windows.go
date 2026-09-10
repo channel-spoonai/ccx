@@ -49,6 +49,18 @@ func Launch(p *config.Profile, args []string) error {
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
 
+	if p.Auth == AuthAnthropic {
+		upstreamURL := ResolveSecret(p.BaseURL)
+		normalize := anthropicNormalizeEnabled(p)
+		prepared, err := prepareAnthropic(p)
+		if err != nil {
+			return err
+		}
+		printBanner(prepared, ctxRes)
+		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize)
+		return runChildClaude(binary, args, BuildEnv(prepared))
+	}
+
 	if p.Auth == AuthOpenAIChat {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		prepared, err := prepareOpenAIChat(p)

@@ -52,6 +52,70 @@ node ccx.mjs -xSet "GLM Coding Plan" -p "hello"      # 프로파일 직접 지�
 
 `ccx.config.example.json`이 템플릿 역할. 새 프로바이더 추가 시 example 파일도 함께 업데이트할 것.
 
+## Session affinity (`sessionHeader`)
+
+프로파일에 `"sessionHeader": "x-session-id"`를 두면 `BuildEnv`(launch.go)가 런치마다
+`ccx-<12hex>` 값을 만들어 `ANTHROPIC_CUSTOM_HEADERS`에 **한 줄 덧붙인다**(개행 구분
+`Name: Value` — Claude Code가 그 형식으로 파싱). 4개 auth 경로 공통이며 기본은 비활성.
+
+Claude Code는 이미 `X-Claude-Code-Session-Id`를 보내지만, 로컬 서버들이 인식하는 이름은
+제각각(MTPLX는 `x-mtplx-session-id`/`x-session-affinity`/`x-session-id`)이라 매치되지 않는다.
+그러면 서버는 프롬프트 프리픽스 추론으로 세션을 짐작하는데, 같은 프로젝트의 **다른** Claude Code
+세션과 시스템+툴 정의 앞부분(실측 35k 토큰)이 겹쳐 오인 결합이 일어나고 KV 재사용률이 무너진다
+(실측 92~99% → 4%). 서버가 아는 이름으로 다시 실어 보내는 게 이 필드의 목적.
+
+불변식 두 가지:
+- **p.Env 루프 뒤에 병합한다** — 사용자가 `profile.env`로 직접 넣은 `ANTHROPIC_CUSTOM_HEADERS`를
+  덮으면 안 되므로 `lookupEnv`로 조립 중인 env에서 현재 값을 읽어 이어 붙인다(`os.Getenv`는
+  p.Env 반영 전 값이라 못 쓴다).
+- **같은 이름의 헤더가 이미 있으면 건드리지 않는다** — 사용자 명시가 우선(`mergeSessionHeader`가
+  `ok=false`를 반환).
+
+값은 런치마다 달라야 한다. 고정값을 쓰면 동시에 띄운 두 세션이 서버에서 같은 세션으로 묶여
+서로의 프리픽스를 덮어쓴다.
+
+## Anthropic 패스스루 프록시: `auth: "anthropic"`
+
+Anthropic 엔드포인트(`/v1/messages`)를 이미 제공하는 업스트림에 **번역 없이** 중계하되,
+프리픽스 캐시를 깨는 형태만 정규화하는 프록시. openai-chat/codex와 달리 페이로드 형식은 그대로다.
+
+```json
+{
+  "name": "MTPLX",
+  "auth": "anthropic",
+  "sessionHeader": "x-session-id",
+  "baseUrl": "http://localhost:8000",
+  "authToken": "...",
+  "models": { "opus": "...", "sonnet": "...", "haiku": "..." }
+}
+```
+
+**존재 이유** — Claude Code는 anthropic-beta `mid-conversation-system-2026-04-07`로 대화 **중간에**
+`role:"system"` 메시지를 턴마다 하나씩 추가한다. Qwen 계열 chat template은 중간 system을
+`System message must be at the beginning.`으로 거부하므로 서버가 재배치·병합하는데, 새 system이
+붙을 때마다 그 결과가 달라져 프롬프트 앞부분이 흔들린다. 그러면 직전 턴의 KV 스냅샷이 더 이상
+프롬프트의 접두가 아니라서 매 턴 재프리필이 난다. 프록시가 이 메시지를 `role:"user"`로 바꾸면
+프롬프트가 다시 append-only가 된다. `ANTHROPIC_BETAS`로는 못 끈다 — 가산 방식이라 베타가 그대로 남는다.
+
+MTPLX + Qwen3.8-Flash-Next 실측(2026-09, 5턴 툴 루프):
+
+| | 적용 전 | 적용 후 |
+|---|---|---|
+| 턴 재사용률 | 98.7% → 85.0% → 57.5% (턴이 깊을수록 하락) | 매 턴 100% (신규 tool_result만 프리필) |
+| 5턴 누적 신규 프리필 | — | 23,989 / 114,199 토큰 |
+| 깊은 턴 TTFT | 197~302초 | 20~22초 |
+
+**아키텍처**:
+- `internal/translate/anthropic/` — `NormalizeSystemMessages` (순수 함수). 최상위 키는 `messages`만
+  교체하고 나머지는 원본 `json.RawMessage` 보존 — 프록시는 번역기가 아니라 패스스루라서
+  손대지 않은 필드가 바이트 그대로 업스트림에 닿아야 한다. system 메시지가 없으면 재직렬화도 하지 않는다.
+- `internal/proxy/anthropic/` — 경로 무관 중계 + SSE 청크별 flush. hop-by-hop과 로컬 자격증명만
+  걷어내고 `anthropic-version`/`anthropic-beta`/`x-session-id`는 보존한 뒤 업스트림 자격증명으로 교체.
+- hidden 서브명령 `__anthropic-proxy`, env 키 `CCX_ANTHROPIC_*` — 데몬 프로토콜 동결 계약 준수(추가만).
+- 정규화 기본 ON. `profile.env`에 `CCX_ANTHROPIC_NORMALIZE_SYSTEM=false`로 끌 수 있다.
+
+정규화 실패는 치명적이지 않다 — 원본을 그대로 보내면 캐시만 손해고 동작은 한다(`server.go`가 에러를 삼킨다).
+
 ## Supported Providers
 
 ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔드포인트(`/v1/messages`)를 그대로 사용**한다. Anthropic 엔드포인트가 없는 업스트림은 내장 변환 프록시로 지원한다 — `auth: "openai-chat"`(Chat Completions), `auth: "codex-oauth"`(ChatGPT Responses), `auth: "openai-responses"`(OpenAI API Responses). 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.
