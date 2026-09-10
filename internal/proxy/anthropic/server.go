@@ -185,6 +185,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 세션 id를 대화 단위로 좁힌다. 런치 단위 id 하나를 메인 대화와 서브에이전트가 공유하면
+	// 먼저 도착한 쪽이 그 세션을 차지하고 자기 히스토리를 committed 스트림에 커밋해, 다른 쪽의
+	// 프리픽스가 어긋난다(실측: 서브에이전트가 메인 id를 차지한 턴 재사용률 38.2%).
+	s.scopeSessionToConversation(r, body)
+
 	// 세션 어피니티 헤더는 "이 세션의 요청은 직렬화된다"는 약속으로 읽힌다. Claude Code는
 	// 서브에이전트 등으로 동시 요청을 내므로, 이미 생성 중인 세션에 또 찍어 보내면 업스트림이
 	// 409(already in flight)로 거절한다. 겹치는 요청에서는 헤더를 빼서 업스트림이 쓰던 대로
@@ -240,6 +245,21 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if rerr != nil {
 			return
 		}
+	}
+}
+
+// scopeSessionToConversation은 ccx가 찍은 런치 id에 대화 해시를 붙여 대화별 id로 만든다.
+// 대화를 식별할 수 없으면 런치 id를 그대로 둔다 — 좁히지 못할 뿐 동작은 한다.
+func (s *Server) scopeSessionToConversation(r *http.Request, body []byte) {
+	if s.sessionHeader == "" || len(body) == 0 {
+		return
+	}
+	base := strings.TrimSpace(r.Header.Get(s.sessionHeader))
+	if base == "" {
+		return
+	}
+	if key := tr.ConversationKey(body); key != "" {
+		r.Header.Set(s.sessionHeader, base+"-"+key)
 	}
 }
 

@@ -225,8 +225,8 @@ func TestProxyDropsSessionHeaderWhenConcurrent(t *testing.T) {
 	if len(seen) != 2 {
 		t.Fatalf("업스트림 요청 %d건, want 2", len(seen))
 	}
-	if seen[0] != "ccx-abc" {
-		t.Errorf("첫 요청은 세션 id를 유지해야 한다: %q", seen[0])
+	if !strings.HasPrefix(seen[0], "ccx-abc-") {
+		t.Errorf("첫 요청은 대화별로 좁힌 세션 id를 유지해야 한다: %q", seen[0])
 	}
 	if seen[1] != "" {
 		t.Errorf("겹친 요청은 세션 id를 빼야 한다: %q", seen[1])
@@ -260,8 +260,51 @@ func TestProxyReleasesSessionSlotAfterResponse(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for i, v := range seen {
-		if v != "ccx-abc" {
-			t.Errorf("순차 요청 %d의 세션 id = %q, want ccx-abc", i, v)
+		if !strings.HasPrefix(v, "ccx-abc-") || v != seen[0] {
+			t.Errorf("순차 요청 %d의 세션 id = %q, want %q 로 모두 동일", i, v, seen[0])
+		}
+	}
+}
+
+// 메인 대화와 서브에이전트는 시스템 프롬프트가 달라 서로 다른 세션 id를 받아야 한다.
+// 그래야 한쪽이 다른 쪽의 committed 스트림을 덮어쓰지 않고, 동시에 떠도 겹치지 않는다.
+func TestProxyScopesSessionPerConversation(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("X-Session-Id"))
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+
+	s, err := Start(ServerOptions{UpstreamBaseURL: up.URL, SessionHeader: "x-session-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Shutdown(t.Context()) }()
+
+	main := `{"system":[{"type":"text","text":"You are Claude Code."}],"messages":[{"role":"user","content":"작업"}]}`
+	sub := `{"system":[{"type":"text","text":"You are a subagent."}],"messages":[{"role":"user","content":"조사"}]}`
+	hdr := map[string]string{"x-session-id": "ccx-abc"}
+	for _, b := range []string{main, sub, main} {
+		resp := post(t, s, "/v1/messages", b, hdr)
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if seen[0] == seen[1] {
+		t.Errorf("메인과 서브에이전트가 같은 세션 id를 받았다: %q", seen[0])
+	}
+	if seen[0] != seen[2] {
+		t.Errorf("같은 대화의 다음 턴이 다른 id를 받았다: %q vs %q", seen[0], seen[2])
+	}
+	for _, v := range seen {
+		if !strings.HasPrefix(v, "ccx-abc-") {
+			t.Errorf("런치 id 접두가 유지돼야 한다: %q", v)
 		}
 	}
 }
@@ -303,7 +346,7 @@ func TestProxyRetriesOnceWithoutHeaderOn409(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 2 || seen[0] != "ccx-abc" || seen[1] != "" {
+	if len(seen) != 2 || !strings.HasPrefix(seen[0], "ccx-abc-") || seen[1] != "" {
 		t.Errorf("요청 순서가 [id 포함, 미포함]이어야 하는데 %v", seen)
 	}
 }
