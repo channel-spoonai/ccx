@@ -32,6 +32,9 @@ type ServerOptions struct {
 
 	// SessionHeader는 ccx가 찍는 세션 어피니티 헤더 이름 (비어 있으면 동시성 조정 안 함).
 	SessionHeader string
+
+	// EffortMap이 있으면 output_config.effort를 업스트림이 읽는 자리로 옮긴다 (nil = 끔).
+	EffortMap map[string]string
 }
 
 type Server struct {
@@ -43,6 +46,7 @@ type Server struct {
 	upstreamAPIKey  string
 	normalizeSystem bool
 	sessionHeader   string
+	effortMap       map[string]string
 	inFlightMu      sync.Mutex
 	inFlight        map[string]bool
 	lastActive      atomic.Int64
@@ -68,6 +72,7 @@ func Start(opts ServerOptions) (*Server, error) {
 		upstreamAPIKey:  opts.UpstreamAPIKey,
 		normalizeSystem: opts.NormalizeSystem,
 		sessionHeader:   strings.TrimSpace(opts.SessionHeader),
+		effortMap:       opts.EffortMap,
 		inFlight:        map[string]bool{},
 		stop:            make(chan struct{}),
 		idleTimeout:     opts.IdleTimeout,
@@ -181,6 +186,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if s.normalizeSystem && len(body) > 0 && strings.HasPrefix(r.URL.Path, "/v1/messages") {
 		// 정규화 실패는 치명적이지 않다 — 원본을 그대로 보내면 캐시만 손해고 동작은 한다.
 		if patched, n, nerr := tr.NormalizeSystemMessages(body); nerr == nil && n > 0 {
+			body = patched
+		}
+	}
+
+	// Claude Code는 effort를 턴마다 output_config.effort로 싣는다(세션 중 /effort로 바꾸면
+	// 다음 요청부터 바뀐 값이 실린다 — 실측 확인). 업스트림이 읽는 자리로 옮겨 두면 사고 깊이가
+	// 대화 도중에도 따라 움직인다. effort가 바뀌면 시스템 블록 첫 토큰부터 달라져 그 턴은
+	// 통째로 재프리필되지만, 그건 이 기능의 대가로 받아들인 비용이다.
+	if len(s.effortMap) > 0 && len(body) > 0 && strings.HasPrefix(r.URL.Path, "/v1/messages") {
+		// 정규화와 마찬가지로 실패는 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
+		if patched, res, eerr := tr.ApplyEffort(body, s.effortMap); eerr == nil && res.Changed {
 			body = patched
 		}
 	}

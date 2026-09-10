@@ -138,6 +138,43 @@ MTPLX + Qwen3.8-Flash-Next 실측(2026-09, 5턴 툴 루프):
 없이(`auth` 미지정 직결) 쓰면 이 보호를 받지 못한다** — 409를 내는 서버라면 `auth: "anthropic"`과
 함께 쓸 것.
 
+**effort → 사고 깊이 매핑** (`ApplyEffort`): Claude Code의 effort(`--effort`, 세션 중에는
+`/effort`)를 업스트림이 실제로 읽는 자리로 옮긴다. 기본 ON.
+
+| Claude Code effort | 업스트림에 나가는 형태 |
+|---|---|
+| `low` | `thinking: {"type":"disabled"}` — 사고 자체를 끈다 |
+| `medium` | `reasoning_effort: "low"` |
+| `high` | `reasoning_effort: "medium"` |
+| `xhigh` / `max` / `ultracode` | `reasoning_effort: "xhigh"` |
+
+두 가지 미스매치를 메운다. (1) Claude Code 2.1.267은 anthropic-beta `effort-2025-11-24`로
+effort를 **`output_config.effort`**에 싣지만, MTPLX가 읽는 자리는 최상위 flat `reasoning_effort`
+하나뿐이라(`_anthropic_to_chat_request`) 그대로는 닿지 않는다 — 넣기 전에는 effort를 low로 두든
+high로 두든 서버 런치 플래그(`--reasoning-effort xhigh`)가 그대로 먹혔다. (2) `thinking`은 effort와
+무관하게 늘 `{"type":"adaptive"}`로 나가고, `MAX_THINKING_TOKENS=0`으로 꺼도 Claude Code는
+필드를 **빼기만** 한다. 업스트림은 `enabled`/`disabled`만 알아듣고 부재는 "의견 없음"으로 읽어
+서버 기본(켬)으로 폴백하므로, 끄려면 `disabled`를 명시해 넣어야 한다.
+
+**한 칸 내려 얹는 이유**: Claude Code는 5단인데 Qwen3.8 Flash Next가 선언한 티어는
+low/medium/xhigh 3종(`reasoning_policy.effort_levels`)이라 1:1로 겹치지 않는다. 같은 `high`라도
+Claude Code 쪽 등급은 Anthropic 모델 기준으로 매겨진 것이라 같은 깊이를 뜻하지 않는다. 맨 아래
+칸인 `low`는 "짧게 생각하기"가 아니라 thinking 자체를 끄는 자리로 쓴다 — Qwen3.8 계열은 thinking을
+끄면 chat template이 `<think>\n\n</think>`를 미리 채워 사고를 건너뛰므로 출력 토큰과 지연이 함께
+줄어든다(실측: 툴 콜 포함 요청 53토큰 9.5초 → 27토큰 3.9초, `tool_use`는 정상). 그 자리를 low 티어에
+내주면 "사고 없이 빠르게"라는 칸이 사라진다.
+
+**대가는 재프리필이다.** effort 문구는 chat template에서 시스템 블록 **맨 앞**에 렌더되므로
+(`chat_template.jinja` `reasoning_instructions`), 값이 바뀌면 프롬프트가 토큰 0번부터 달라져 그 턴은
+통째로 다시 프리필된다. 실측(4턴, 매 턴 전환): 누적 신규 프리필이 고정 11,685 → 전환 17,862 토큰
+(+53%), 전환 턴 TTFT 7초 → 17~22초. 세션 id를 effort별로 갈라 committed 스트림을 나눠 봤지만
+히스토리가 자라는 실제 대화에서는 구제되지 않았다(17,861로 차이 없음) — 그래서 `ConversationKey`
+재료에 effort를 넣지 않는다. 전환은 그 턴에 비용을 내고 하는 것이지, 공짜로 만들 수 있는 게 아니다.
+
+표는 `profile.env`의 `CCX_ANTHROPIC_EFFORT_MAP`으로 바꾼다(`"low=off,medium=low,high=medium,xhigh=xhigh,max=xhigh,ultracode=xhigh"`).
+값이 `off`/`false`/`0`/`none`이면 기능 자체를 끄고, 개별 티어에 `keep`을 주면 그 티어만 손대지 않는다.
+매핑 실패는 정규화와 마찬가지로 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
+
 ## Supported Providers
 
 ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔드포인트(`/v1/messages`)를 그대로 사용**한다. Anthropic 엔드포인트가 없는 업스트림은 내장 변환 프록시로 지원한다 — `auth: "openai-chat"`(Chat Completions), `auth: "codex-oauth"`(ChatGPT Responses), `auth: "openai-responses"`(OpenAI API Responses). 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.

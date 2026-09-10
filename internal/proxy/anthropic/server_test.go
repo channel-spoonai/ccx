@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	tr "github.com/channel-spoonai/ccx/internal/translate/anthropic"
 )
 
 type capture struct {
@@ -348,5 +350,70 @@ func TestProxyRetriesOnceWithoutHeaderOn409(t *testing.T) {
 	defer mu.Unlock()
 	if len(seen) != 2 || !strings.HasPrefix(seen[0], "ccx-abc-") || seen[1] != "" {
 		t.Errorf("요청 순서가 [id 포함, 미포함]이어야 하는데 %v", seen)
+	}
+}
+
+// effort 매핑이 붙은 프록시. 기본 표(low=off, high=xhigh)를 쓴다.
+func startProxyWithEffort(t *testing.T, upstream string) *Server {
+	t.Helper()
+	s, err := Start(ServerOptions{
+		UpstreamBaseURL: upstream,
+		UpstreamAuth:    "upstream-token",
+		EffortMap:       tr.DefaultEffortMap(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Shutdown(t.Context()) })
+	return s
+}
+
+// Claude Code는 세션 중 /effort로 값을 바꾸면 다음 요청부터 바뀐 값을 싣는다. 프록시는
+// 요청마다 표를 다시 적용하므로 사고 깊이가 대화 도중에도 따라 움직인다.
+func TestProxyMapsEffortPerRequest(t *testing.T) {
+	var got capture
+	up := newUpstream(t, &got, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"ok":true}`)) })
+	defer up.Close()
+	s := startProxyWithEffort(t, up.URL)
+
+	const tmpl = `{"model":"m","output_config":{"effort":"%s"},"thinking":{"type":"adaptive"},"messages":[]}`
+
+	resp := post(t, s, "/v1/messages", strings.Replace(tmpl, "%s", "high", 1), nil)
+	_ = resp.Body.Close()
+	var high map[string]json.RawMessage
+	if err := json.Unmarshal(got.body, &high); err != nil {
+		t.Fatalf("본문 파싱 실패: %v", err)
+	}
+	if string(high["reasoning_effort"]) != `"medium"` {
+		t.Errorf("high는 medium으로 실려야 하는데 %s", high["reasoning_effort"])
+	}
+
+	resp = post(t, s, "/v1/messages", strings.Replace(tmpl, "%s", "low", 1), nil)
+	_ = resp.Body.Close()
+	var low map[string]json.RawMessage
+	if err := json.Unmarshal(got.body, &low); err != nil {
+		t.Fatalf("본문 파싱 실패: %v", err)
+	}
+	if string(low["thinking"]) != `{"type":"disabled"}` {
+		t.Errorf("low는 thinking을 꺼야 하는데 %s", low["thinking"])
+	}
+	if _, ok := low["reasoning_effort"]; ok {
+		t.Errorf("thinking을 끈 요청에 reasoning_effort가 실렸다: %s", got.body)
+	}
+}
+
+// 매핑을 끄면 본문은 바이트 그대로 나간다.
+func TestProxyLeavesEffortAloneWhenDisabled(t *testing.T) {
+	var got capture
+	up := newUpstream(t, &got, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{}`)) })
+	defer up.Close()
+	s := startProxy(t, up.URL, false)
+
+	const body = `{"model":"m","output_config":{"effort":"low"},"messages":[]}`
+	resp := post(t, s, "/v1/messages", body, nil)
+	defer resp.Body.Close()
+
+	if string(got.body) != body {
+		t.Errorf("매핑을 껐는데 본문이 바뀌었다:\n%s", got.body)
 	}
 }

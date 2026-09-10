@@ -20,6 +20,7 @@ type DaemonOptions struct {
 	UpstreamAPIKey  string
 	NormalizeSystem bool
 	SessionHeader   string
+	EffortMap       map[string]string
 	IdleTimeout     time.Duration
 	ReadyWriter     interface {
 		Write([]byte) (int, error)
@@ -42,6 +43,7 @@ func RunDaemon(opts DaemonOptions) error {
 		UpstreamAPIKey:  opts.UpstreamAPIKey,
 		NormalizeSystem: opts.NormalizeSystem,
 		SessionHeader:   opts.SessionHeader,
+		EffortMap:       opts.EffortMap,
 		IdleTimeout:     opts.IdleTimeout,
 	})
 	if err != nil {

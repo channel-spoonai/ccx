@@ -8,6 +8,7 @@ import (
 
 	"github.com/channel-spoonai/ccx/internal/config"
 	proxy "github.com/channel-spoonai/ccx/internal/proxy/anthropic"
+	tr "github.com/channel-spoonai/ccx/internal/translate/anthropic"
 )
 
 // AuthAnthropic은 Profile.Auth 값. Anthropic 호환 업스트림에 요청을 **번역 없이** 중계하는
@@ -23,6 +24,7 @@ const AuthAnthropic = "anthropic"
 
 // prepareAnthropic은 패스스루 프록시를 띄우고 BaseURL/AuthToken을 주입한 profile copy를 준다.
 // 정규화는 기본 ON. profile.env에 CCX_ANTHROPIC_NORMALIZE_SYSTEM=false 로 끌 수 있다.
+// effort 매핑도 기본 ON — profile.env의 CCX_ANTHROPIC_EFFORT_MAP으로 표를 바꾸거나 끈다.
 func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 	upstream := ResolveSecret(p.BaseURL)
 	if upstream == "" {
@@ -43,6 +45,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 		UpstreamAPIKey:  ResolveSecret(p.APIKey),
 		NormalizeSystem: normalize,
 		SessionHeader:   strings.TrimSpace(p.SessionHeader),
+		EffortMap:       anthropicEffortMapValue(p),
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn anthropic proxy: %w", err)
@@ -55,12 +58,30 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 	return &p2, nil
 }
 
-func printAnthropicBanner(addr, upstream string, normalize bool) {
+func printAnthropicBanner(addr, upstream string, normalize bool, effort map[string]string) {
 	note := ""
 	if normalize {
 		note = " (mid-conversation system → user)"
 	}
 	fmt.Printf("\x1B[36m[ccx]\x1B[0m Anthropic passthrough proxy: %s → %s%s\n", addr, upstream, note)
+	if len(effort) > 0 {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Effort → thinking: %s\n", tr.FormatEffortMap(effort))
+	}
+}
+
+// anthropicEffortMapValue는 데몬에 넘길 원문 env 값 (빈 문자열이면 데몬이 기본 표를 쓴다).
+func anthropicEffortMapValue(p *config.Profile) string {
+	return strings.TrimSpace(ResolveSecret(p.Env[proxy.CCXEffortMapEnv]))
+}
+
+// anthropicEffortMap은 배너 출력용 — 데몬과 동일한 판정. 깨진 값이면 nil을 주고
+// 배너에서 조용히 빠진다(데몬 쪽이 stderr로 한 줄 알린다).
+func anthropicEffortMap(p *config.Profile) map[string]string {
+	m, err := tr.EffortMapFromEnv(anthropicEffortMapValue(p))
+	if err != nil {
+		return nil
+	}
+	return m
 }
 
 // anthropicNormalizeEnabled는 배너 출력용 — prepareAnthropic과 동일한 판정.

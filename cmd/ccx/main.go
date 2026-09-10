@@ -16,6 +16,7 @@ import (
 	anthropicproxy "github.com/channel-spoonai/ccx/internal/proxy/anthropic"
 	proxy "github.com/channel-spoonai/ccx/internal/proxy/codex"
 	openaiproxy "github.com/channel-spoonai/ccx/internal/proxy/openaichat"
+	anthropictr "github.com/channel-spoonai/ccx/internal/translate/anthropic"
 	"github.com/channel-spoonai/ccx/internal/update"
 )
 
@@ -307,6 +308,12 @@ func runOpenAIChatProxyDaemon() {
 func runAnthropicProxyDaemon() {
 	ppid, _ := strconv.Atoi(os.Getenv(anthropicproxy.CCXProxyParentPIDEnv))
 	normalize := os.Getenv(anthropicproxy.CCXNormalizeSystemEnv) != "false"
+	// 매핑이 깨져 있으면 기능만 끄고 프록시는 계속 뜬다 — 사고 깊이가 서버 기본으로 돌 뿐이다.
+	effortMap, emErr := anthropictr.EffortMapFromEnv(os.Getenv(anthropicproxy.CCXEffortMapEnv))
+	if emErr != nil {
+		fmt.Fprintln(os.Stderr, "[ccx anthropic-proxy] ignoring effort map:", emErr)
+		effortMap = nil
+	}
 
 	err := anthropicproxy.RunDaemon(anthropicproxy.DaemonOptions{
 		ParentPID:       ppid,
@@ -316,6 +323,7 @@ func runAnthropicProxyDaemon() {
 		UpstreamAPIKey:  os.Getenv(anthropicproxy.CCXUpstreamAPIKeyEnv),
 		NormalizeSystem: normalize,
 		SessionHeader:   os.Getenv(anthropicproxy.CCXSessionHeaderEnv),
+		EffortMap:       effortMap,
 		IdleTimeout:     0,
 		ReadyWriter:     os.Stdout,
 	})

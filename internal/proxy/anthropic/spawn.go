@@ -31,6 +31,10 @@ const (
 	// CCXSessionHeaderEnv는 profile.sessionHeader 이름. 프록시가 동시 요청에서
 	// 이 헤더를 빼야 하는지 판단하는 데 쓴다.
 	CCXSessionHeaderEnv = "CCX_ANTHROPIC_SESSION_HEADER"
+
+	// CCXEffortMapEnv는 Claude Code effort → 업스트림 동작 매핑
+	// ("low=off,medium=medium,high=xhigh,max=xhigh"). 비어 있으면 기본 표.
+	CCXEffortMapEnv = "CCX_ANTHROPIC_EFFORT_MAP"
 )
 
 type SpawnInput struct {
@@ -39,6 +43,7 @@ type SpawnInput struct {
 	UpstreamAPIKey  string
 	NormalizeSystem bool
 	SessionHeader   string
+	EffortMap       string
 }
 
 type SpawnedDaemon struct {
@@ -71,6 +76,7 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		CCXUpstreamAPIKeyEnv+"="+in.UpstreamAPIKey,
 		CCXNormalizeSystemEnv+"="+strconv.FormatBool(in.NormalizeSystem),
 		CCXSessionHeaderEnv+"="+in.SessionHeader,
+		CCXEffortMapEnv+"="+in.EffortMap,
 	)
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()

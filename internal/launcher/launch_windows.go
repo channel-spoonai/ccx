@@ -52,12 +52,13 @@ func Launch(p *config.Profile, args []string) error {
 	if p.Auth == AuthAnthropic {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		normalize := anthropicNormalizeEnabled(p)
+		effortMap := anthropicEffortMap(p)
 		prepared, err := prepareAnthropic(p)
 		if err != nil {
 			return err
 		}
 		printBanner(prepared, ctxRes)
-		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize)
+		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap)
 		return runChildClaude(binary, args, BuildEnv(prepared))
 	}
 

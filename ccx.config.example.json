@@ -72,7 +72,7 @@
     },
     {
       "name": "MTPLX / Anthropic-compatible local server",
-      "description": "Local server that already speaks Anthropic /v1/messages. `auth: \"anthropic\"` runs a passthrough proxy (no payload translation) that rewrites Claude Code's mid-conversation `role:\"system\"` messages into `user` messages — Qwen-family chat templates reject a system message that is not first, so the server relocates it and the prompt prefix shifts every turn, forcing a full re-prefill. Pair it with `sessionHeader` so the server can pin the conversation.",
+      "description": "Local server that already speaks Anthropic /v1/messages. `auth: \"anthropic\"` runs a passthrough proxy (no payload translation) that rewrites Claude Code's mid-conversation `role:\"system\"` messages into `user` messages — Qwen-family chat templates reject a system message that is not first, so the server relocates it and the prompt prefix shifts every turn, forcing a full re-prefill. Pair it with `sessionHeader` so the server can pin the conversation. It also maps Claude Code's 5 effort levels onto Qwen3.8's 3 reasoning tiers, one notch down — `low` turns thinking off outright, `medium`\u2192low, `high`\u2192medium, `xhigh`/`max`/`ultracode`\u2192xhigh; `/effort` mid-session takes effect on the next turn (that turn re-prefills). Override or disable with `CCX_ANTHROPIC_EFFORT_MAP` in `env`.",
       "auth": "anthropic",
       "sessionHeader": "x-session-id",
       "baseUrl": "http://localhost:8000",
