@@ -315,6 +315,7 @@ func runAnthropicProxyDaemon() {
 		UpstreamAuth:    os.Getenv(anthropicproxy.CCXUpstreamAuthEnv),
 		UpstreamAPIKey:  os.Getenv(anthropicproxy.CCXUpstreamAPIKeyEnv),
 		NormalizeSystem: normalize,
+		SessionHeader:   os.Getenv(anthropicproxy.CCXSessionHeaderEnv),
 		IdleTimeout:     0,
 		ReadyWriter:     os.Stdout,
 	})

@@ -27,6 +27,10 @@ const (
 
 	// CCXNormalizeSystemEnv는 "false"/"0"이면 중간 role:"system" 정규화를 끈다.
 	CCXNormalizeSystemEnv = "CCX_ANTHROPIC_NORMALIZE_SYSTEM"
+
+	// CCXSessionHeaderEnv는 profile.sessionHeader 이름. 프록시가 동시 요청에서
+	// 이 헤더를 빼야 하는지 판단하는 데 쓴다.
+	CCXSessionHeaderEnv = "CCX_ANTHROPIC_SESSION_HEADER"
 )
 
 type SpawnInput struct {
@@ -34,6 +38,7 @@ type SpawnInput struct {
 	UpstreamAuth    string
 	UpstreamAPIKey  string
 	NormalizeSystem bool
+	SessionHeader   string
 }
 
 type SpawnedDaemon struct {
@@ -65,6 +70,7 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		CCXUpstreamAuthEnv+"="+in.UpstreamAuth,
 		CCXUpstreamAPIKeyEnv+"="+in.UpstreamAPIKey,
 		CCXNormalizeSystemEnv+"="+strconv.FormatBool(in.NormalizeSystem),
+		CCXSessionHeaderEnv+"="+in.SessionHeader,
 	)
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()

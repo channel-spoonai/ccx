@@ -3,6 +3,7 @@ package launcher
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/channel-spoonai/ccx/internal/config"
@@ -41,6 +42,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 		UpstreamAuth:    ResolveSecret(p.AuthToken),
 		UpstreamAPIKey:  ResolveSecret(p.APIKey),
 		NormalizeSystem: normalize,
+		SessionHeader:   strings.TrimSpace(p.SessionHeader),
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn anthropic proxy: %w", err)

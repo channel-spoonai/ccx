@@ -116,6 +116,22 @@ MTPLX + Qwen3.8-Flash-Next 실측(2026-09, 5턴 툴 루프):
 
 정규화 실패는 치명적이지 않다 — 원본을 그대로 보내면 캐시만 손해고 동작은 한다(`server.go`가 에러를 삼킨다).
 
+**동시 요청과 세션 헤더** (v0.5.2에서 고친 회귀): 세션 어피니티 헤더는 "이 세션의 요청은
+직렬화된다"는 약속으로 읽힌다. MTPLX `engine_session.generation_slot`은 헤더로 **명시된**
+세션이 이미 생성 중이면 `409 session ... is already in flight`로 거절하고, 프리픽스 추론으로
+잡힌 암묵 세션(`IMPLICIT_SESSION_SOURCES`)만 익명 세션으로 갈라 처리한다. Claude Code는
+서브에이전트 등으로 동시 요청을 내므로 모든 요청에 같은 id를 박으면 두 번째부터 409를 맞는다.
+
+프록시가 세션별 in-flight를 추적해 **겹치는 요청에서는 헤더를 뺀다**(`claimSession`). 메인
+대화는 계속 같은 id를 유지해 캐시 재사용이 그대로이고, 겹친 요청만 업스트림의 추론 경로로
+넘어간다. 선점 판정이 업스트림 상태와 어긋날 수도 있어(다른 클라이언트가 같은 id를 쓰거나
+앞선 요청이 비정상 종료돼 플래그가 남은 경우) **409를 받으면 헤더를 빼고 한 번만 재시도**한다.
+슬롯은 응답 스트림이 끝날 때 푼다 — 안 풀면 이후 모든 턴이 헤더 없이 나가 캐시가 통째로 사라진다.
+
+헤더 이름은 `CCX_ANTHROPIC_SESSION_HEADER`로 데몬에 전달된다. **`sessionHeader`는 프록시
+없이(`auth` 미지정 직결) 쓰면 이 보호를 받지 못한다** — 409를 내는 서버라면 `auth: "anthropic"`과
+함께 쓸 것.
+
 ## Supported Providers
 
 ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔드포인트(`/v1/messages`)를 그대로 사용**한다. Anthropic 엔드포인트가 없는 업스트림은 내장 변환 프록시로 지원한다 — `auth: "openai-chat"`(Chat Completions), `auth: "codex-oauth"`(ChatGPT Responses), `auth: "openai-responses"`(OpenAI API Responses). 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.

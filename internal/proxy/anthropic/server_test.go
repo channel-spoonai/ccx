@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type capture struct {
@@ -167,5 +169,141 @@ func TestProxyRejectsWrongSecret(t *testing.T) {
 	}
 	if got.body != nil {
 		t.Error("인증 실패인데 업스트림으로 전달됐다")
+	}
+}
+
+// 세션 헤더는 "이 세션 요청은 직렬화된다"는 약속이라, 겹쳐 보내면 업스트림이 409로 거절한다
+// (MTPLX engine_session.generation_slot). Claude Code는 서브에이전트로 동시 요청을 내므로
+// 겹치는 쪽에서는 헤더를 빼야 한다 — 그래야 업스트림이 암묵 세션으로 갈라 처리한다.
+func TestProxyDropsSessionHeaderWhenConcurrent(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var seen []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("X-Session-Id"))
+		first := len(seen) == 1
+		mu.Unlock()
+		if first {
+			<-release // 첫 요청을 붙잡아 둘째와 겹치게 만든다
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+
+	s, err := Start(ServerOptions{UpstreamBaseURL: up.URL, SessionHeader: "x-session-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Shutdown(t.Context()) }()
+
+	hdr := map[string]string{"x-session-id": "ccx-abc"}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp := post(t, s, "/v1/messages", withMidSystem, hdr)
+		_ = resp.Body.Close()
+	}()
+
+	// 첫 요청이 업스트림에 도달할 때까지 기다렸다가 둘째를 보낸다.
+	for i := 0; i < 100; i++ {
+		mu.Lock()
+		n := len(seen)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp := post(t, s, "/v1/messages", withMidSystem, hdr)
+	_ = resp.Body.Close()
+	close(release)
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("업스트림 요청 %d건, want 2", len(seen))
+	}
+	if seen[0] != "ccx-abc" {
+		t.Errorf("첫 요청은 세션 id를 유지해야 한다: %q", seen[0])
+	}
+	if seen[1] != "" {
+		t.Errorf("겹친 요청은 세션 id를 빼야 한다: %q", seen[1])
+	}
+}
+
+// 슬롯은 응답 스트림이 끝나면 풀려야 한다 — 안 그러면 이후 모든 턴이 헤더 없이 나가
+// 캐시 재사용이 통째로 사라진다.
+func TestProxyReleasesSessionSlotAfterResponse(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("X-Session-Id"))
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+
+	s, err := Start(ServerOptions{UpstreamBaseURL: up.URL, SessionHeader: "x-session-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Shutdown(t.Context()) }()
+
+	for i := 0; i < 3; i++ {
+		resp := post(t, s, "/v1/messages", withMidSystem, map[string]string{"x-session-id": "ccx-abc"})
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i, v := range seen {
+		if v != "ccx-abc" {
+			t.Errorf("순차 요청 %d의 세션 id = %q, want ccx-abc", i, v)
+		}
+	}
+}
+
+// 업스트림이 그래도 409를 내면(다른 클라이언트가 같은 id를 쓰거나 앞선 요청이 비정상 종료돼
+// 플래그가 남은 경우) 헤더를 빼고 한 번만 다시 시도한다.
+func TestProxyRetriesOnceWithoutHeaderOn409(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sid := r.Header.Get("X-Session-Id")
+		mu.Lock()
+		seen = append(seen, sid)
+		mu.Unlock()
+		if sid != "" {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":"session is already in flight"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer up.Close()
+
+	s, err := Start(ServerOptions{UpstreamBaseURL: up.URL, SessionHeader: "x-session-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Shutdown(t.Context()) }()
+
+	resp := post(t, s, "/v1/messages", withMidSystem, map[string]string{"x-session-id": "ccx-abc"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (재시도가 성공해야 한다)", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `"ok":true`) {
+		t.Errorf("body = %q", body)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 || seen[0] != "ccx-abc" || seen[1] != "" {
+		t.Errorf("요청 순서가 [id 포함, 미포함]이어야 하는데 %v", seen)
 	}
 }

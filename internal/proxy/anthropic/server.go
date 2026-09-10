@@ -29,6 +29,9 @@ type ServerOptions struct {
 
 	// NormalizeSystem이 true면 messages 안의 role:"system"을 role:"user"로 바꾼다.
 	NormalizeSystem bool
+
+	// SessionHeader는 ccx가 찍는 세션 어피니티 헤더 이름 (비어 있으면 동시성 조정 안 함).
+	SessionHeader string
 }
 
 type Server struct {
@@ -39,6 +42,9 @@ type Server struct {
 	upstreamAuth    string
 	upstreamAPIKey  string
 	normalizeSystem bool
+	sessionHeader   string
+	inFlightMu      sync.Mutex
+	inFlight        map[string]bool
 	lastActive      atomic.Int64
 	stop            chan struct{}
 	stopOnce        sync.Once
@@ -61,6 +67,8 @@ func Start(opts ServerOptions) (*Server, error) {
 		upstreamAuth:    opts.UpstreamAuth,
 		upstreamAPIKey:  opts.UpstreamAPIKey,
 		normalizeSystem: opts.NormalizeSystem,
+		sessionHeader:   strings.TrimSpace(opts.SessionHeader),
+		inFlight:        map[string]bool{},
 		stop:            make(chan struct{}),
 		idleTimeout:     opts.IdleTimeout,
 	}
@@ -177,10 +185,32 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 세션 어피니티 헤더는 "이 세션의 요청은 직렬화된다"는 약속으로 읽힌다. Claude Code는
+	// 서브에이전트 등으로 동시 요청을 내므로, 이미 생성 중인 세션에 또 찍어 보내면 업스트림이
+	// 409(already in flight)로 거절한다. 겹치는 요청에서는 헤더를 빼서 업스트림이 쓰던 대로
+	// 프롬프트 프리픽스 추론에 맡긴다 — 그쪽은 동시 요청을 별도 세션으로 갈라 처리한다.
+	// 메인 대화는 계속 같은 id를 유지하므로 캐시 재사용은 그대로다.
+	stamped := s.claimSession(r)
+	if stamped != "" {
+		defer s.releaseSession(stamped)
+	}
+
 	upstream, err := s.forward(r, body)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, "api_error", "upstream request failed: "+err.Error())
 		return
+	}
+	// 선점 판정과 업스트림의 실제 상태가 어긋날 수 있다(다른 클라이언트가 같은 id를 쓰거나,
+	// 앞선 요청이 비정상 종료돼 플래그가 남은 경우). 헤더를 빼고 한 번만 다시 시도한다.
+	if upstream.StatusCode == http.StatusConflict && stamped != "" {
+		_ = upstream.Body.Close()
+		r.Header.Del(s.sessionHeader)
+		if retry, rerr := s.forward(r, body); rerr == nil {
+			upstream = retry
+		} else {
+			writeJSONError(w, http.StatusBadGateway, "api_error", "upstream retry failed: "+rerr.Error())
+			return
+		}
 	}
 	defer upstream.Body.Close()
 
@@ -211,6 +241,33 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// claimSession은 이 요청이 세션 슬롯을 선점했으면 그 값을, 못 했으면 ""를 돌려준다.
+// 선점 실패 시 요청에서 헤더를 지워 업스트림이 암묵 세션으로 처리하게 한다.
+// 생성이 없는 count_tokens는 슬롯을 잡지 않는다.
+func (s *Server) claimSession(r *http.Request) string {
+	if s.sessionHeader == "" || strings.HasSuffix(r.URL.Path, "count_tokens") {
+		return ""
+	}
+	v := strings.TrimSpace(r.Header.Get(s.sessionHeader))
+	if v == "" {
+		return ""
+	}
+	s.inFlightMu.Lock()
+	defer s.inFlightMu.Unlock()
+	if s.inFlight[v] {
+		r.Header.Del(s.sessionHeader)
+		return ""
+	}
+	s.inFlight[v] = true
+	return v
+}
+
+func (s *Server) releaseSession(v string) {
+	s.inFlightMu.Lock()
+	delete(s.inFlight, v)
+	s.inFlightMu.Unlock()
 }
 
 // skipResponseHeader는 net/http가 스스로 관리하는 hop-by-hop 헤더를 거른다.
