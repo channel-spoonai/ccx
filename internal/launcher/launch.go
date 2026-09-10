@@ -147,14 +147,17 @@ func printBanner(p *config.Profile, res *ctxwin.Resolution) {
 	}
 	if p.Models != nil {
 		var parts []string
-		if p.Models.Opus != "" {
-			parts = append(parts, "opus→"+p.Models.Opus)
+		// ctxwin이 재작성한 "[1m]"은 Claude Code가 인식하는 유일한 표기라서 붙는 것이지
+		// 그 모델이 1M을 처리한다는 뜻이 아니다. 그대로 보여주면 262K 모델이 1M으로 읽혀
+		// 오해를 부르므로 여기서는 떼고, 실제 윈도우는 바로 아래 Context 줄이 말한다.
+		if s := stripCtxSuffix(p.Models.Opus); s != "" {
+			parts = append(parts, "opus→"+s)
 		}
-		if p.Models.Sonnet != "" {
-			parts = append(parts, "sonnet→"+p.Models.Sonnet)
+		if s := stripCtxSuffix(p.Models.Sonnet); s != "" {
+			parts = append(parts, "sonnet→"+s)
 		}
-		if p.Models.Haiku != "" {
-			parts = append(parts, "haiku→"+p.Models.Haiku)
+		if s := stripCtxSuffix(p.Models.Haiku); s != "" {
+			parts = append(parts, "haiku→"+s)
 		}
 		if len(parts) > 0 {
 			fmt.Printf("\x1B[36m[ccx]\x1B[0m Models: %s\n", strings.Join(parts, ", "))
@@ -165,6 +168,14 @@ func printBanner(p *config.Profile, res *ctxwin.Resolution) {
 	}
 	printContextLine(res)
 	fmt.Println()
+}
+
+// stripCtxSuffix는 배너 표시용으로 컨텍스트 표기를 떼어낸다.
+func stripCtxSuffix(model string) string {
+	if base, _, ok := ctxwin.ParseSuffix(model); ok {
+		return base
+	}
+	return model
 }
 
 // printContextLine은 ctxwin이 해석한 컨텍스트 윈도우와 주입 결과를 한 줄로 보여준다.

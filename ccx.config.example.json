@@ -60,7 +60,7 @@
     },
     {
       "name": "LM Studio (local)",
-      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio. Append a [128k]-style suffix (or add via ccx to auto-detect the loaded context) so Claude Code knows the real context window. `sessionHeader` makes ccx stamp a per-launch session id so a server that reuses KV state across turns can pin the conversation instead of guessing from the prompt prefix.",
+      "description": "Local LM Studio server — replace model IDs with the identifiers loaded in LM Studio. Adding this through ccx detects the context window (LM Studio's native API, else the context_length/max_model_len that vLLM/SGLang/MTPLX declare on /v1/models) and asks you to confirm it, so Claude Code stops assuming 200k. `sessionHeader` makes ccx stamp a per-launch session id so a server that reuses KV state across turns can pin the conversation instead of guessing from the prompt prefix.",
       "baseUrl": "http://localhost:1234",
       "authToken": "lmstudio",
       "sessionHeader": "x-session-id",

@@ -10,16 +10,28 @@ import (
 	"time"
 )
 
+// openAIModelList는 표준 /v1/models 응답. context 관련 필드는 스펙에 없지만
+// vLLM·SGLang·MTPLX 등 다수 서버가 실제 서빙 한도를 여기에 실어 보낸다.
 type openAIModelList struct {
 	Data []struct {
-		ID string `json:"id"`
+		ID               string `json:"id"`
+		ContextLength    int    `json:"context_length"`
+		MaxContextLength int    `json:"max_context_length"`
+		MaxModelLen      int    `json:"max_model_len"`
 	} `json:"data"`
 }
 
 type LMStudioResult struct {
 	Models []string
-	URL    string
-	Err    error
+
+	// Contexts는 /v1/models가 선언한 모델별 컨텍스트 한도. 선언이 없으면 빈 맵.
+	// 여러 필드가 동시에 오면 최솟값을 취한다 — max_context_length는 모델 스펙상
+	// 최대치이고 max_model_len은 이 배포가 실제로 서빙하는 한도라, 큰 쪽을 믿으면
+	// 조용한 컨텍스트 오버플로가 된다.
+	Contexts map[string]int
+
+	URL string
+	Err error
 }
 
 // FetchLMStudioModels hits the OpenAI-compatible /v1/models endpoint that
@@ -58,12 +70,31 @@ func FetchLMStudioModels(baseURL, token string) LMStudioResult {
 	}
 
 	models := make([]string, 0, len(list.Data))
+	contexts := map[string]int{}
 	for _, m := range list.Data {
-		if m.ID != "" {
-			models = append(models, m.ID)
+		if m.ID == "" {
+			continue
+		}
+		models = append(models, m.ID)
+		if w := minPositive(m.MaxModelLen, m.ContextLength, m.MaxContextLength); w > 0 {
+			contexts[m.ID] = w
 		}
 	}
-	return LMStudioResult{Models: models, URL: url}
+	return LMStudioResult{Models: models, Contexts: contexts, URL: url}
+}
+
+// minPositive는 0보다 큰 값들 중 최솟값을 돌려준다 (전부 0이면 0).
+func minPositive(values ...int) int {
+	out := 0
+	for _, v := range values {
+		if v <= 0 {
+			continue
+		}
+		if out == 0 || v < out {
+			out = v
+		}
+	}
+	return out
 }
 
 // IsLMStudio heuristically detects LM Studio profiles by name.

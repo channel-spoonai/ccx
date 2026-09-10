@@ -156,3 +156,115 @@ func TestContextSuffixRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestParseContextInput(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+		ok   bool
+	}{
+		{"262144", 262144, true},
+		{"262k", 262000, true},
+		{"262K", 262000, true},
+		{"1m", 1000000, true},
+		{"1M", 1000000, true},
+		{"1.05m", 1050000, true},
+		{"131,072", 131072, true},
+		{"  32k ", 32000, true},
+		{"", 0, true},   // 빈 입력 = 표기 생략
+		{"0", 0, false}, // 0은 의미 없는 윈도우라 재입력
+		{"abc", 0, false},
+		{"-5", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := ParseContextInput(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("ParseContextInput(%q) = (%d,%v), want (%d,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestStripContextSuffix(t *testing.T) {
+	cases := map[string]string{
+		"model[262k]":      "model",
+		"model[1m]":        "model",
+		"model[1M]":        "model",
+		"vendor/model[8k]": "vendor/model",
+		"model":            "model",
+		"model[abc]":       "model[abc]", // 컨텍스트 표기가 아니면 건드리지 않는다
+		"":                 "",
+	}
+	for in, want := range cases {
+		if got := StripContextSuffix(in); got != want {
+			t.Errorf("StripContextSuffix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// ContextSuffix는 k 단위 내림이라 실제보다 크게 선언하지 않는다 —
+// 과대 선언은 조용한 컨텍스트 오버플로가 되므로 이 방향이 안전하다.
+func TestContextSuffixNeverOverstates(t *testing.T) {
+	cases := map[int]string{
+		262144:  "[262k]",
+		131072:  "[131k]",
+		1000000: "[1m]",
+		1050000: "[1m]",
+		999:     "",
+	}
+	for in, want := range cases {
+		if got := ContextSuffix(in); got != want {
+			t.Errorf("ContextSuffix(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMinPositive(t *testing.T) {
+	cases := []struct {
+		in   []int
+		want int
+	}{
+		{[]int{262144, 262144, 262144}, 262144},
+		{[]int{0, 131072, 1000000}, 131072}, // 서빙 한도가 스펙 최대치보다 작으면 그쪽을 믿는다
+		{[]int{0, 0, 0}, 0},
+		{[]int{-1, 4096}, 4096},
+	}
+	for _, c := range cases {
+		if got := minPositive(c.in...); got != c.want {
+			t.Errorf("minPositive(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// vLLM·SGLang·MTPLX 등은 LM Studio 네이티브 API가 없는 대신 표준 /v1/models에
+// 서빙 한도를 실어 보낸다. 그걸 놓치면 커스텀 모델 ID가 전부 200K로 가정된다.
+func TestFetchLMStudioModelsReadsContextFromV1(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"served","context_length":262144,"max_context_length":262144,"max_model_len":262144},
+			{"id":"capped","context_length":131072,"max_context_length":1000000},
+			{"id":"silent"}]}`))
+	}))
+	defer srv.Close()
+
+	res := FetchLMStudioModels(srv.URL, "")
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if got := res.Contexts["served"]; got != 262144 {
+		t.Errorf("served = %d, want 262144", got)
+	}
+	// 스펙 최대치(1M)가 아니라 이 배포가 실제로 서빙하는 값을 믿어야 한다.
+	if got := res.Contexts["capped"]; got != 131072 {
+		t.Errorf("capped = %d, want 131072", got)
+	}
+	if _, ok := res.Contexts["silent"]; ok {
+		t.Error("컨텍스트를 선언하지 않은 모델은 맵에 없어야 한다")
+	}
+	if len(res.Models) != 3 {
+		t.Errorf("models = %v", res.Models)
+	}
+}

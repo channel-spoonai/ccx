@@ -242,7 +242,15 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 `ctxwin.Apply`(Launch 최상단, 4개 auth 경로 공통)가 프로파일 copy의 모델 ID suffix(없으면 `catalog.go`의 정적 수치)를 전달 공식으로 변환한다: W≥1M → `[1m]` / 200K<W<1M → `[1m]`+ACW=W / W==200K → 표기 제거만 / W<200K → ACW=W. **200K<W<1M 구간의 `[1m]`+ACW는 분리 불가능한 짝** — 이 불변식 때문에 (a) ACW 후보에서 제외되는 haiku는 W≥1M일 때만 `[1m]`을 받고(짝 없는 `[1m]`은 1M 과대 인식), (b) 사용자 명시 ACW가 티어 실제 윈도우보다 크면 그 티어의 `[1m]` 부착을 생략한다(200K 추정이 안전). ACW는 전역 단일값이라 opus/sonnet/model 중 min을 채택하고 haiku는 제외(소형 haiku가 세션 전체를 캡하는 것 방지, 대신 배너 경고). codex-oauth는 소스 무관 `min(W, 272000)` 캡. 우선순위: 사용자 명시값(`profile.env` > ambient — BuildEnv의 p.Env 루프가 마지막이라) > 계산값. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
 
-프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min), LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백), NVIDIA NIM(`NVIDIAContextWindow` — 아래 실측 테이블)이 감지값을 `ContextSuffix`로 모델 ID에 박제한다. z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
+프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min), LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백), NVIDIA NIM(`NVIDIAContextWindow` — 아래 실측 테이블)이 감지값을 `ContextSuffix`로 모델 ID에 박제한다.
+
+로컬 서버는 네이티브 API가 없는 쪽이 더 많다. vLLM·SGLang·MTPLX는 표준 `/v1/models`에 `context_length`/`max_context_length`/`max_model_len`을 실어 보내므로 `FetchLMStudioModels`가 이를 함께 파싱해 `LMStudioResult.Contexts`로 돌려준다. **여러 필드가 오면 최솟값을 취한다** — `max_context_length`는 모델 스펙상 최대치이고 `max_model_len`은 이 배포가 실제로 서빙하는 한도라, 큰 쪽을 믿으면 조용한 컨텍스트 오버플로가 된다. 우선순위는 네이티브(실할당) > `/v1/models`(선언값) 순이고, 둘 다 없으면 등록 단계에서 사용자에게 묻는다.
+
+`confirmContextWindows`(flows)가 모델 선택 직후 티어별이 아니라 **모델별로 한 번씩** 컨텍스트를 확인받는다. 감지값이 있으면 기본값으로 채워 Enter만 누르면 되고, 비워 두면 표기를 생략한다(= Claude Code의 200K 가정). 입력은 `262144`/`262k`/`1m`을 받는다(`ParseContextInput`). `ContextSuffix`가 k 단위 내림이라 262144는 `[262k]`로 기록된다 — 과대 선언은 오버플로가 되므로 이 방향이 안전하다.
+
+**배너의 Models 줄은 컨텍스트 표기를 떼고 보여준다**(`stripCtxSuffix`). ctxwin이 붙이는 `[1m]`은 Claude Code가 인식하는 유일한 표기라서 붙는 것이지 그 모델이 1M을 처리한다는 뜻이 아니다. 그대로 노출하면 262K 모델이 1M으로 읽혀 오해를 부른다 — 실제 윈도우는 바로 아래 `Context:` 줄이 말한다.
+
+프로파일 이름은 **모델 설정이 끝난 뒤에** 묻는다(`customizeTemplate` 말미). 로컬 서버는 템플릿 이름이 "LM Studio (local)" 같은 일반명이라 쓸모가 없어, 선택한 모델 ID를 기본값으로 채워 짧게 고쳐 등록하게 한다(`suggestProfileName`). z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
 
 **`CatalogLookup`은 `vendor/model` ID의 벤더 세그먼트를 벗겨 재시도하지 않는다** (한때 넣었다가 되돌림). 같은 모델이라도 호스팅 프로바이더마다 실서빙 한도가 다르기 때문이다 — `deepseek-v4-pro`는 DeepSeek 직결에서 1M이지만 NIM에서는 262,144, `glm-5.2`는 z.ai에서 1M이지만 NIM에서는 202,752다(2026-07 실측). 벤더를 무시하고 매칭하면 조용한 컨텍스트 오버플로가 된다. 프로바이더별 차이는 catalog로 표현할 수 없으므로 NIM은 박제 경로를 쓴다.
 

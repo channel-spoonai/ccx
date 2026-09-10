@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/channel-spoonai/ccx/internal/config"
@@ -80,17 +81,7 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 	fmt.Println("  \x1B[90mUse env:VAR_NAME instead of a literal value to read from an environment variable at runtime.\x1B[0m")
 	fmt.Println()
 
-	// 이름 — 중복이면 " (copy)" 제안
-	suggested := tpl.Name
-	if existingNames[strings.ToLower(suggested)] {
-		suggested = tpl.Name + " (copy)"
-	}
-	name, err := promptUnique("Profile name", suggested, existingNames)
-	if err != nil {
-		return nil, err
-	}
-	tpl.Name = name
-
+	var err error
 	if isLM {
 		if tpl.BaseURL, err = menu.PromptLine("baseUrl (endpoint)", menu.PromptOptions{Default: tpl.BaseURL, Prefill: true, Required: true}); err != nil {
 			return nil, err
@@ -128,7 +119,34 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 		configureAnthropicModels(&tpl)
 	}
 
+	// 이름은 마지막에 묻는다 — 어떤 모델을 걸었는지 본 뒤에 지어야 이름이 쓸모 있다.
+	// 로컬 서버는 모델 ID가 곧 프로파일의 정체라 그걸 기본값으로 채워 편집만 하면 되게 한다.
+	name, err := promptUnique("Profile name", suggestProfileName(&tpl, isLM, existingNames), existingNames)
+	if err != nil {
+		return nil, err
+	}
+	tpl.Name = name
+
 	return &tpl, nil
+}
+
+// suggestProfileName은 이름 프롬프트의 기본값을 고른다.
+// 로컬 서버(LM Studio 계열)는 템플릿 이름이 "LM Studio (local)" 같은 일반명이라 쓸모가 없어
+// 선택한 모델 ID를 제안한다. 그 외 템플릿은 프로바이더 이름 자체가 좋은 이름이다.
+func suggestProfileName(tpl *config.Profile, isLM bool, taken map[string]bool) string {
+	suggested := tpl.Name
+	if isLM && tpl.Models != nil {
+		for _, m := range []string{tpl.Models.Opus, tpl.Models.Sonnet, tpl.Models.Haiku} {
+			if base := providers.StripContextSuffix(m); base != "" {
+				suggested = base
+				break
+			}
+		}
+	}
+	if taken[strings.ToLower(suggested)] {
+		suggested += " (copy)"
+	}
+	return suggested
 }
 
 func addManual(existing []config.Profile) (*config.Profile, error) {
@@ -416,32 +434,117 @@ func configureLMStudioModels(tpl *config.Profile) {
 		fmt.Printf("  \x1B[33m⚠ fetch failed: %s\x1B[0m\n", res.Err)
 		fmt.Println("  \x1B[90mEnter models manually.\x1B[0m")
 		tpl.Models = promptModelsManual(tpl.Models)
+		// 목록을 못 받았으니 감지값도 없다 — 컨텍스트는 순수 수동 입력.
+		confirmContextWindows(tpl, nil)
 		return
 	}
 	if len(res.Models) == 0 {
 		fmt.Println("  \x1B[33m⚠ No models loaded. Load a model in LM Studio first.\x1B[0m")
 		tpl.Models = promptModelsManual(tpl.Models)
+		confirmContextWindows(tpl, nil)
 		return
 	}
 	fmt.Printf("  \x1B[32m✓\x1B[0m %d models found\n", len(res.Models))
 
-	// 네이티브 API로 로드된 인스턴스의 실할당 컨텍스트를 조회해 suffix로 박제 —
-	// launch 시 ctxwin이 이 표기를 해석해 Claude Code에 전달한다.
+	// 컨텍스트 감지는 두 소스를 합친다. LM Studio 네이티브 API는 로드된 인스턴스에
+	// **실제 할당된** 값이라 우선하고, 표준 /v1/models가 선언한 값(vLLM·MTPLX 등의
+	// max_model_len)으로 빈칸을 채운다. 어느 쪽도 없으면 사용자에게 묻는다.
 	ctxByModel := providers.FetchLMStudioContexts(tpl.BaseURL, tpl.AuthToken)
+	if ctxByModel == nil {
+		ctxByModel = map[string]int{}
+	}
+	for id, w := range res.Contexts {
+		if _, ok := ctxByModel[id]; !ok {
+			ctxByModel[id] = w
+		}
+	}
 
 	items := make([]menu.CatalogItem, 0, len(res.Models))
 	for _, m := range res.Models {
 		desc := ""
 		if w := ctxByModel[m]; w > 0 {
-			desc = fmt.Sprintf("ctx %d (loaded)", w)
+			desc = fmt.Sprintf("ctx %s", formatTokens(w))
 		}
-		items = append(items, menu.CatalogItem{
-			Label:       m,
-			Description: desc,
-			Payload:     m + providers.ContextSuffix(ctxByModel[m]),
-		})
+		// Payload는 bare ID — 컨텍스트 표기는 선택이 끝난 뒤 confirmContextWindows가 붙인다.
+		items = append(items, menu.CatalogItem{Label: m, Description: desc, Payload: m})
 	}
 	pickModelTiers(tpl, items)
+	confirmContextWindows(tpl, ctxByModel)
+}
+
+// formatTokens는 토큰 수를 사람이 읽는 짧은 표기로 바꾼다 (262144 → "262k").
+func formatTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return strings.TrimSuffix(strings.TrimRight(fmt.Sprintf("%.2f", float64(n)/1_000_000), "0"), ".") + "m"
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", n/1_000)
+	default:
+		return strconv.Itoa(n)
+	}
+}
+
+// confirmContextWindows는 선택된 모델마다 컨텍스트 길이를 확인받아 ID에 표기로 박는다.
+//
+// Claude Code는 커스텀 모델 ID를 무조건 200K로 가정하므로, 표기가 없으면 262K 모델도
+// 200K로 잘리고 반대로 128K 모델은 오버플로가 난다. 자동 감지값이 있으면 기본값으로
+// 채워 Enter만 누르면 되고, 없거나 틀리면 그 자리에서 고칠 수 있다.
+func confirmContextWindows(tpl *config.Profile, detected map[string]int) {
+	if tpl.Models == nil {
+		return
+	}
+	tiers := []*string{&tpl.Models.Opus, &tpl.Models.Sonnet, &tpl.Models.Haiku}
+
+	// 같은 모델을 여러 티어에 걸어도 한 번만 묻는다.
+	seen := map[string]string{}
+	var order []string
+	for _, t := range tiers {
+		base := providers.StripContextSuffix(*t)
+		if base == "" {
+			continue
+		}
+		if _, ok := seen[base]; !ok {
+			seen[base] = ""
+			order = append(order, base)
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("  \x1B[90mContext window — blank to leave it unset (Claude Code then assumes 200k).\x1B[0m")
+	fmt.Println("  \x1B[90mAccepts 262144, 262k or 1m.\x1B[0m")
+	for _, base := range order {
+		def := ""
+		if w := detected[base]; w > 0 {
+			def = formatTokens(w)
+		}
+		for {
+			raw, err := menu.PromptLine("Context window for "+base, menu.PromptOptions{Default: def, Prefill: def != ""})
+			if err != nil {
+				return
+			}
+			w, ok := providers.ParseContextInput(raw)
+			if !ok {
+				fmt.Printf("  \x1B[31mcannot read %q — try 262144, 262k or 1m.\x1B[0m\n", raw)
+				continue
+			}
+			seen[base] = providers.ContextSuffix(w)
+			if s := seen[base]; s != "" && w >= 1_000 && w%1_000 != 0 {
+				// ContextSuffix는 k 단위 내림이라 실제보다 크게 선언하지 않는다.
+				fmt.Printf("  \x1B[90mrecorded as %s\x1B[0m\n", s)
+			}
+			break
+		}
+	}
+	for _, t := range tiers {
+		base := providers.StripContextSuffix(*t)
+		if base == "" {
+			continue
+		}
+		*t = base + seen[base]
+	}
 }
 
 func configureOpenRouterModels(tpl *config.Profile) {
