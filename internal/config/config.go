@@ -38,6 +38,14 @@ type Profile struct {
 	Models      *Models           `json:"models,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 
+	// SessionHeader는 세션 어피니티 헤더 이름 (예: "x-session-id").
+	// 비어 있으면 비활성. 설정하면 launcher가 런치마다 유니크한 id를 만들어
+	// ANTHROPIC_CUSTOM_HEADERS에 병합한다 — 프롬프트 프리픽스 추론에만 의존하는
+	// 로컬 서버(MTPLX 등)가 대화를 한 세션으로 붙잡아 KV 캐시를 재사용하게 한다.
+	// Claude Code 자신은 X-Claude-Code-Session-Id를 보내지만 이름이 달라
+	// 인식하지 못하는 서버가 있어, 서버가 아는 이름으로 다시 실어 보낸다.
+	SessionHeader string `json:"sessionHeader,omitempty"`
+
 	// Auth 는 인증 방식 디스크리미네이터. 빈 문자열이면 기존 정적 토큰 흐름.
 	// "codex-oauth" 면 launcher가 ChatGPT(OpenAI Codex) OAuth 흐름으로 분기 —
 	// baseUrl/authToken/apiKey 필드는 무시되고 ccx가 로컬 프록시를 띄워 자동 주입한다.

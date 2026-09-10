@@ -1,6 +1,8 @@
 package launcher
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +36,56 @@ func BuildEnv(p *config.Profile) []string {
 	for k, v := range p.Env {
 		set(k, v)
 	}
+	// p.Env 루프 뒤에 병합한다 — 사용자가 profile.env로 직접 지정한
+	// ANTHROPIC_CUSTOM_HEADERS를 덮지 않고 한 줄 덧붙이기 위해서다.
+	if h := strings.TrimSpace(p.SessionHeader); h != "" {
+		if merged, ok := mergeSessionHeader(lookupEnv(env, customHeadersEnv), h, NewSessionID()); ok {
+			env = replaceOrAppend(env, customHeadersEnv, merged)
+		}
+	}
 	return env
+}
+
+// customHeadersEnv는 Claude Code가 모든 요청에 실어 보내는 추가 헤더 목록.
+// 개행으로 구분된 "Name: Value" 형식으로 파싱된다.
+const customHeadersEnv = "ANTHROPIC_CUSTOM_HEADERS"
+
+// NewSessionID는 런치마다 유니크한 세션 어피니티 값을 만든다.
+// 값 자체에 의미는 없고 "같은 claude 프로세스의 요청끼리만 같으면" 된다 —
+// 그래서 동시에 두 세션을 띄워도 서로의 프리픽스를 덮어쓰지 않는다.
+func NewSessionID() string {
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("ccx-%d", os.Getpid())
+	}
+	return "ccx-" + hex.EncodeToString(buf[:])
+}
+
+// mergeSessionHeader는 기존 ANTHROPIC_CUSTOM_HEADERS에 세션 헤더 한 줄을 덧붙인다.
+// 같은 이름의 헤더가 이미 있으면 사용자 지정이 우선이므로 그대로 두고 ok=false.
+func mergeSessionHeader(existing, name, value string) (string, bool) {
+	for _, line := range strings.Split(existing, "\n") {
+		key, _, found := strings.Cut(line, ":")
+		if found && strings.EqualFold(strings.TrimSpace(key), name) {
+			return "", false
+		}
+	}
+	line := name + ": " + value
+	if strings.TrimSpace(existing) == "" {
+		return line, true
+	}
+	return strings.TrimRight(existing, "\n") + "\n" + line, true
+}
+
+// lookupEnv는 조립 중인 env 슬라이스에서 값을 읽는다 (os.Getenv는 p.Env 반영 전 값이라 못 쓴다).
+func lookupEnv(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return strings.TrimPrefix(e, prefix)
+		}
+	}
+	return ""
 }
 
 // ResolveSecret은 config.ResolveSecret의 얇은 별칭 — 구현이 config 패키지로
@@ -108,6 +159,9 @@ func printBanner(p *config.Profile, res *ctxwin.Resolution) {
 		if len(parts) > 0 {
 			fmt.Printf("\x1B[36m[ccx]\x1B[0m Models: %s\n", strings.Join(parts, ", "))
 		}
+	}
+	if h := strings.TrimSpace(p.SessionHeader); h != "" {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Session affinity: %s (per-launch id)\n", h)
 	}
 	printContextLine(res)
 	fmt.Println()

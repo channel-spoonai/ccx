@@ -123,3 +123,53 @@ func filterAnthropic(env []string) []string {
 	}
 	return out
 }
+
+func envValue(env []string, key string) string { return lookupEnv(env, key) }
+
+func TestSessionHeaderInjected(t *testing.T) {
+	os.Unsetenv(customHeadersEnv)
+	p := &config.Profile{Name: "t", BaseURL: "http://localhost:8000", SessionHeader: "x-session-id"}
+
+	got := envValue(BuildEnv(p), customHeadersEnv)
+	if !strings.HasPrefix(got, "x-session-id: ccx-") {
+		t.Fatalf("헤더가 주입되지 않았다: %q", got)
+	}
+	// 런치마다 값이 달라야 동시 세션이 서로의 프리픽스를 덮지 않는다.
+	if again := envValue(BuildEnv(p), customHeadersEnv); again == got {
+		t.Errorf("두 번의 BuildEnv가 같은 세션 id를 냈다: %q", got)
+	}
+}
+
+func TestSessionHeaderDisabledByDefault(t *testing.T) {
+	os.Unsetenv(customHeadersEnv)
+	p := &config.Profile{Name: "t", BaseURL: "http://localhost:8000"}
+	if got := envValue(BuildEnv(p), customHeadersEnv); got != "" {
+		t.Errorf("SessionHeader가 비었는데 헤더가 생겼다: %q", got)
+	}
+}
+
+func TestSessionHeaderMergesWithProfileEnv(t *testing.T) {
+	os.Unsetenv(customHeadersEnv)
+	p := &config.Profile{
+		Name:          "t",
+		SessionHeader: "x-session-id",
+		Env:           map[string]string{customHeadersEnv: "x-tenant: acme"},
+	}
+	got := envValue(BuildEnv(p), customHeadersEnv)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 || lines[0] != "x-tenant: acme" || !strings.HasPrefix(lines[1], "x-session-id: ccx-") {
+		t.Errorf("기존 헤더를 보존하며 덧붙이지 않았다: %q", got)
+	}
+}
+
+func TestSessionHeaderYieldsToUserValue(t *testing.T) {
+	os.Unsetenv(customHeadersEnv)
+	p := &config.Profile{
+		Name:          "t",
+		SessionHeader: "x-session-id",
+		Env:           map[string]string{customHeadersEnv: "X-Session-Id: mine"},
+	}
+	if got := envValue(BuildEnv(p), customHeadersEnv); got != "X-Session-Id: mine" {
+		t.Errorf("사용자 지정 헤더를 덮어썼다: %q", got)
+	}
+}
