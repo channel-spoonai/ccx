@@ -328,6 +328,8 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 **배너의 Models 줄은 컨텍스트 표기를 떼고 보여준다**(`stripCtxSuffix`). ctxwin이 붙이는 `[1m]`은 Claude Code가 인식하는 유일한 표기라서 붙는 것이지 그 모델이 1M을 처리한다는 뜻이 아니다. 그대로 노출하면 262K 모델이 1M으로 읽혀 오해를 부른다 — 실제 윈도우는 바로 아래 `Context:` 줄이 말한다.
 
+템플릿 baseUrl이 로컬 주소(`config.IsLocalBaseURL` — 런치의 `IsLocalProfile`과 같은 기준)면 등록 시 **주소를 먼저 확인받는다**(LM Studio·MTPLX·lightning-mlx). 기본값은 localhost지만 같은 LAN의 다른 머신에서 서버를 돌리는 경우가 흔하고, 인증 기본값(`findPriorAuth`)이 호스트 기준이라 그보다 먼저 물어야 한다.
+
 프로파일 이름은 **모델 설정이 끝난 뒤에** 묻는다(`customizeTemplate` 말미). 로컬 서버는 템플릿 이름이 "LM Studio (local)" 같은 일반명이라 쓸모가 없어, 선택한 모델 ID를 기본값으로 채워 짧게 고쳐 등록하게 한다(`suggestProfileName`). z.ai/DeepSeek/MiniMax/OpenAI는 모델 목록 API가 컨텍스트를 노출하지 않아 `catalog.go` 정적 테이블(최장 prefix 매칭)이 담당 — 신규 모델은 테이블 갱신 후 릴리즈하면 자동 업데이트로 전파된다.
 
 **`CatalogLookup`은 `vendor/model` ID의 벤더 세그먼트를 벗겨 재시도하지 않는다** (한때 넣었다가 되돌림). 같은 모델이라도 호스팅 프로바이더마다 실서빙 한도가 다르기 때문이다 — `deepseek-v4-pro`는 DeepSeek 직결에서 1M이지만 NIM에서는 262,144, `glm-5.2`는 z.ai에서 1M이지만 NIM에서는 202,752다(2026-07 실측). 벤더를 무시하고 매칭하면 조용한 컨텍스트 오버플로가 된다. 프로바이더별 차이는 catalog로 표현할 수 없으므로 NIM은 박제 경로를 쓴다.

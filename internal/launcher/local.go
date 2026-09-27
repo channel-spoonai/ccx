@@ -3,8 +3,6 @@ package launcher
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,20 +78,7 @@ func applyLocalDefaults(p *config.Profile, args []string) (*config.Profile, []st
 // IsLocalProfile은 baseUrl 호스트가 loopback이거나 사설망 주소면 true.
 // 같은 LAN의 다른 머신(예: 192.168.x의 Mac mini)도 로컬 모델 서버라 같은 문제를 겪는다.
 func IsLocalProfile(p *config.Profile) bool {
-	raw := strings.TrimSpace(ResolveSecret(p.BaseURL))
-	if raw == "" {
-		return false
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+	return config.IsLocalBaseURL(p.BaseURL)
 }
 
 // hasPermissionArg는 사용자가 CLI로 권한 모드를 직접 골랐는지 본다.

@@ -82,7 +82,10 @@ func customizeTemplate(tpl config.Profile, existing []config.Profile) (*config.P
 	fmt.Println()
 
 	var err error
-	if isLM {
+	// 로컬 서버 템플릿(LM Studio, MTPLX 등)은 기본 주소가 localhost일 뿐 같은 LAN의 다른
+	// 머신에서 돌리는 경우도 흔하므로 주소를 확인받는다. 인증 기본값(findPriorAuth)이
+	// 호스트 기준이라 반드시 그보다 먼저 물어야 한다.
+	if isLM || config.IsLocalBaseURL(tpl.BaseURL) {
 		if tpl.BaseURL, err = menu.PromptLine("baseUrl (endpoint)", menu.PromptOptions{Default: tpl.BaseURL, Prefill: true, Required: true}); err != nil {
 			return nil, err
 		}

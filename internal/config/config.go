@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,4 +285,24 @@ func equalFold(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// IsLocalBaseURL은 baseUrl 호스트가 loopback·사설망·.local이면 true.
+// 런치(로컬 기본값)와 등록 flows(주소 프롬프트)가 같은 기준을 쓰도록 여기 둔다.
+// env:VAR 참조는 해석 후 판정한다.
+func IsLocalBaseURL(raw string) bool {
+	raw = strings.TrimSpace(ResolveSecret(raw))
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
 }
