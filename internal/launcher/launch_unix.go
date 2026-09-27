@@ -25,12 +25,17 @@ func Launch(p *config.Profile, args []string) error {
 	// 형태([1m] + AUTO_COMPACT_WINDOW)로 정규화 — 4개 auth 경로 공통.
 	p, ctxRes := ctxwin.Apply(p)
 
+	// 로컬 모델 서버면 auto 모드 분류기와 away summary를 끈다 — prepare가 baseUrl을
+	// 127.0.0.1 프록시로 바꾸기 전에 원래 호스트로 판정해야 한다.
+	p, args, localAdj := applyLocalDefaults(p, args)
+
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)
 		if err != nil {
 			return err
 		}
 		printBanner(prepared, ctxRes)
+		printLocalAdjustments(localAdj)
 		printCodexOAuthBanner(prepared.BaseURL, "")
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
@@ -46,6 +51,7 @@ func Launch(p *config.Profile, args []string) error {
 			return err
 		}
 		printBanner(prepared, ctxRes)
+		printLocalAdjustments(localAdj)
 		printOpenAIResponsesBanner(prepared.BaseURL, endpoint)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
@@ -60,6 +66,7 @@ func Launch(p *config.Profile, args []string) error {
 			return err
 		}
 		printBanner(prepared, ctxRes)
+		printLocalAdjustments(localAdj)
 		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
@@ -72,6 +79,7 @@ func Launch(p *config.Profile, args []string) error {
 			return err
 		}
 		printBanner(prepared, ctxRes)
+		printLocalAdjustments(localAdj)
 		printOpenAIChatBanner(prepared.BaseURL, upstreamURL)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
@@ -79,6 +87,7 @@ func Launch(p *config.Profile, args []string) error {
 
 	env := BuildEnv(p)
 	printBanner(p, ctxRes)
+	printLocalAdjustments(localAdj)
 	argv := append([]string{binary}, args...)
 	return syscall.Exec(binary, argv, env)
 }

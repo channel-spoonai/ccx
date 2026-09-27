@@ -46,6 +46,11 @@ type Profile struct {
 	// 인식하지 못하는 서버가 있어, 서버가 아는 이름으로 다시 실어 보낸다.
 	SessionHeader string `json:"sessionHeader,omitempty"`
 
+	// PermissionMode는 claude에 --permission-mode로 넘길 값 (예: "acceptEdits", "auto").
+	// 비어 있으면 로컬 프로파일에서만 설정상 auto를 acceptEdits로 낮춘다 — auto 모드
+	// 분류기 요청이 로컬 서버에서 타임아웃되기 때문. CLI로 직접 넘긴 값이 항상 우선.
+	PermissionMode string `json:"permissionMode,omitempty"`
+
 	// Auth 는 인증 방식 디스크리미네이터. 빈 문자열이면 기존 정적 토큰 흐름.
 	// "codex-oauth" 면 launcher가 ChatGPT(OpenAI Codex) OAuth 흐름으로 분기 —
 	// baseUrl/authToken/apiKey 필드는 무시되고 ccx가 로컬 프록시를 띄워 자동 주입한다.

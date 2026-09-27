@@ -175,6 +175,25 @@ Claude Code 쪽 등급은 Anthropic 모델 기준으로 매겨진 것이라 같�
 값이 `off`/`false`/`0`/`none`이면 기능 자체를 끄고, 개별 티어에 `keep`을 주면 그 티어만 손대지 않는다.
 매핑 실패는 정규화와 마찬가지로 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
 
+## 로컬 프로파일 기본값 (`internal/launcher/local.go`)
+
+`baseUrl` 호스트가 loopback·사설망·`.local`이면(`IsLocalProfile`, auth 경로 무관 — prepare가
+baseUrl을 프록시로 바꾸기 **전**에 판정) Launch가 두 가지를 끈다. 배너에 한 줄씩 표시된다.
+
+- **auto 모드 → `acceptEdits`**: auto는 툴 호출마다 대화 전체를 `<transcript>`로 묶은 분류기 요청을
+  따로 보낸다. 로컬 서버에서는 매번 캐시 없는 ~30K 프리필이 되어 Claude Code 분류기 타임아웃(약 60초)을
+  넘겨 끊기고, 끝까지 못 가니 KV가 커밋되지 않아 다음 분류도 처음부터 다시 한다(2026-09 MTPLX 실측:
+  31건 중 완료 0건, 툴 호출마다 ~65초, 동시 프리필 경합으로 메인 턴 TTFT 0.5초 → 7~13초).
+  Claude Code 설정(user < project < local settings)의 `permissions.defaultMode`가 `auto`일 때만
+  `--permission-mode acceptEdits`를 argv 맨 앞에 넣는다. CLI의 `--permission-mode`/
+  `--dangerously-skip-permissions`가 항상 우선이고, `profile.permissionMode`를 적으면 로컬 여부와
+  무관하게 그 값을 넘긴다(auto를 유지하려면 `"permissionMode": "auto"`). 세션 중 Shift+Tab으로
+  auto에 들어가는 것까지는 막지 못한다.
+- **away summary(recap) off**: `CLAUDE_CODE_ENABLE_AWAY_SUMMARY=0` 주입. recap은 메인 대화를
+  포크한 부가 요청이라 `ConversationKey`가 같아 메인과 같은 세션 id로 나가고, 그 내용이 메인 세션의
+  committed 스트림에 커밋돼 다음 메인 턴의 프리픽스를 어긋나게 한다. `profile.env`나 셸 환경에
+  값이 있으면 그 값이 우선한다.
+
 ## Supported Providers
 
 ccx는 Claude Code를 재사용하므로 기본 경로는 **Anthropic 호환 엔드포인트(`/v1/messages`)를 그대로 사용**한다. Anthropic 엔드포인트가 없는 업스트림은 내장 변환 프록시로 지원한다 — `auth: "openai-chat"`(Chat Completions), `auth: "codex-oauth"`(ChatGPT Responses), `auth: "openai-responses"`(OpenAI API Responses). 각 프로바이더의 정확한 URL/모델 ID는 자주 바뀌므로 `ccx.config.example.json` 업데이트 시 공식 문서를 다시 확인할 것.
