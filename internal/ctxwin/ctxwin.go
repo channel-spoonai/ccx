@@ -218,6 +218,59 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 	return &out, res
 }
 
+// Disable1MEnv는 Claude Code의 1M 컨텍스트 인식을 통째로 끄는 환경변수.
+const Disable1MEnv = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
+
+// Guard1M은 어떤 티어도 1M을 선언하지 않은 프로파일에 Disable1MEnv=1을 주입한 copy를
+// 반환한다. Apply 이후에 호출해야 한다(최종 모델 ID의 "[1m]" 유무로 판정).
+//
+// Claude Code 2.1.283의 기본 모델은 "opus[1m]"이라, 모델을 고르지 않으면
+// ANTHROPIC_DEFAULT_OPUS_MODEL 뒤에 "[1m]"을 스스로 붙여 1M으로 해석한다(실측:
+// /model → "<id>[1m] (default)"). 커스텀 ID라도 200K 가정이 적용되지 않아 statusline의
+// context_window_size가 1M이 되고, ACW가 없으면 자동 압축도 1M 기준이라 오버플로가 난다.
+//
+// 한 티어라도 "[1m]"을 달고 있으면 건드리지 않는다 — 끄면 "[1m]" 인식 자체가 사라져
+// Apply의 "[1m]"+ACW 짝이 깨진다. 그래서 일부 티어만 1M인 혼합 프로파일의 비-1M
+// 티어는 여전히 ACW에만 의존한다. 모델을 하나도 지정하지 않은 프로파일(순정 Claude
+// 모델 경로)과 사용자가 키를 직접 둔 경우(profile.env/ambient)도 제외한다.
+func Guard1M(p *config.Profile) (*config.Profile, bool) {
+	if p == nil || disabled() {
+		return p, false
+	}
+	if _, ok := p.Env[Disable1MEnv]; ok {
+		return p, false
+	}
+	if _, ok := os.LookupEnv(Disable1MEnv); ok {
+		return p, false
+	}
+	var ids []string
+	if p.Models != nil {
+		ids = append(ids, p.Models.Opus, p.Models.Sonnet, p.Models.Haiku)
+	}
+	ids = append(ids, p.Model)
+	any := false
+	for _, raw := range ids {
+		id := config.ResolveSecret(raw)
+		if id == "" {
+			continue
+		}
+		any = true
+		if strings.Contains(strings.ToLower(id), "[1m]") {
+			return p, false
+		}
+	}
+	if !any {
+		return p, false
+	}
+	out := *p
+	out.Env = make(map[string]string, len(p.Env)+1)
+	for k, v := range p.Env {
+		out.Env[k] = v
+	}
+	out.Env[Disable1MEnv] = "1"
+	return &out, true
+}
+
 // stripOnly는 kill-switch 상태의 최소 동작 — [1m] 부착·ACW 주입·카탈로그를
 // 전부 생략하되, Claude Code가 인식하지 못하는 ccx 전용 suffix가 업스트림에
 // 리터럴로 새는 것만은 막는다. 공식 표기인 "[1m]"은 보존한다.

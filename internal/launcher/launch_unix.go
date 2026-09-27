@@ -29,6 +29,9 @@ func Launch(p *config.Profile, args []string) error {
 	// 127.0.0.1 프록시로 바꾸기 전에 원래 호스트로 판정해야 한다.
 	p, args, localAdj := applyLocalDefaults(p, args)
 
+	// 어떤 티어도 1M을 선언하지 않으면 Claude Code 기본 모델 opus[1m]의 1M 과대 인식을 끈다.
+	p, localAdj.Disable1M = ctxwin.Guard1M(p)
+
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)
 		if err != nil {

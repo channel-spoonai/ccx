@@ -34,6 +34,7 @@ type localAdjustments struct {
 	PermissionFrom string // 비어 있으면 권한 모드를 건드리지 않음
 	PermissionTo   string
 	AwaySummaryOff bool
+	Disable1M      bool // ctxwin.Guard1M이 CLAUDE_CODE_DISABLE_1M_CONTEXT를 주입함 (로컬 여부 무관)
 }
 
 // applyLocalDefaults는 로컬 프로파일이면 auto 모드와 away summary를 끈다.
@@ -168,5 +169,8 @@ func printLocalAdjustments(adj localAdjustments) {
 	}
 	if adj.AwaySummaryOff {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m Away summary (recap): off (local model — keeps the session cache aligned)\n")
+	}
+	if adj.Disable1M {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m 1M context: off (no model declares ≥1M — overrides Claude Code's default opus[1m])\n")
 	}
 }

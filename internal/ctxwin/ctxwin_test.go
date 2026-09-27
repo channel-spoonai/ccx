@@ -316,3 +316,80 @@ func TestApplyEnvReference(t *testing.T) {
 		t.Errorf("unset ref must stay raw, got %q", out2.Model)
 	}
 }
+
+func TestGuard1M(t *testing.T) {
+	hermetic(t)
+	neutralize(t, Disable1MEnv)
+
+	tiers := func(opus, sonnet, haiku string) *config.Profile {
+		return &config.Profile{Models: &config.Models{Opus: opus, Sonnet: sonnet, Haiku: haiku}}
+	}
+	cases := []struct {
+		name string
+		p    *config.Profile
+		want bool
+	}{
+		{"미상 ID (MTPLX)", tiers("p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next"), true},
+		{"200K 카탈로그", tiers("glm-4.7", "glm-4.7", "glm-4.5"), true},
+		{"model 필드만", &config.Profile{Model: "local"}, true},
+		{"한 티어라도 [1m]", tiers("gpt-5.6-sol", "glm-4.7", "glm-4.7"), false},
+		{"262k → [1m]+ACW", tiers("kimi-k2.5", "kimi-k2.5", "kimi-k2.5"), false},
+		{"대문자 [1M] suffix", tiers("local[1M]", "local", "local"), false},
+		{"모델 미설정", &config.Profile{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			applied, _ := Apply(c.p)
+			out, got := Guard1M(applied)
+			if got != c.want {
+				t.Fatalf("Guard1M = %v, want %v", got, c.want)
+			}
+			if got && out.Env[Disable1MEnv] != "1" {
+				t.Fatalf("env 미주입: %v", out.Env)
+			}
+			if !got && out.Env[Disable1MEnv] != "" {
+				t.Fatalf("주입되면 안 됨: %v", out.Env)
+			}
+		})
+	}
+}
+
+func TestGuard1MRespectsUser(t *testing.T) {
+	hermetic(t)
+	neutralize(t, Disable1MEnv)
+
+	env := map[string]string{Disable1MEnv: "0"}
+	p := &config.Profile{Model: "local", Env: env}
+	if _, got := Guard1M(p); got {
+		t.Fatal("profile.env 명시값을 덮으면 안 됨")
+	}
+
+	t.Setenv(Disable1MEnv, "0")
+	if _, got := Guard1M(&config.Profile{Model: "local"}); got {
+		t.Fatal("ambient 명시값을 덮으면 안 됨")
+	}
+}
+
+func TestGuard1MDoesNotMutateInput(t *testing.T) {
+	hermetic(t)
+	neutralize(t, Disable1MEnv)
+
+	env := map[string]string{"API_TIMEOUT_MS": "1"}
+	p := &config.Profile{Model: "local", Env: env}
+	out, got := Guard1M(p)
+	if !got || out == p {
+		t.Fatal("copy에 주입해야 함")
+	}
+	if _, leaked := env[Disable1MEnv]; leaked {
+		t.Fatal("원본 Env 맵이 오염됨")
+	}
+}
+
+func TestGuard1MKillSwitch(t *testing.T) {
+	hermetic(t)
+	neutralize(t, Disable1MEnv)
+	t.Setenv(AutoEnv, "0")
+	if _, got := Guard1M(&config.Profile{Model: "local"}); got {
+		t.Fatal("CCX_CONTEXT_AUTO=0이면 주입하면 안 됨")
+	}
+}
