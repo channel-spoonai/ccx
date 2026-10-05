@@ -22,15 +22,15 @@ func Launch(p *config.Profile, args []string) error {
 	}
 
 	// 모델 ID의 컨텍스트 suffix/카탈로그 수치를 Claude Code가 인식하는
-	// 형태([1m] + AUTO_COMPACT_WINDOW)로 정규화 — 4개 auth 경로 공통.
+	// 형태([1m] / MAX_CONTEXT_TOKENS)로 정규화 — 4개 auth 경로 공통.
 	p, ctxRes := ctxwin.Apply(p)
 
 	// 로컬 모델 서버면 auto 모드 분류기와 away summary를 끈다 — prepare가 baseUrl을
 	// 127.0.0.1 프록시로 바꾸기 전에 원래 호스트로 판정해야 한다.
 	p, args, localAdj := applyLocalDefaults(p, args)
 
-	// 어떤 티어도 1M을 선언하지 않으면 Claude Code 기본 모델 opus[1m]의 1M 과대 인식을 끈다.
-	p, localAdj.Disable1M = ctxwin.Guard1M(p)
+	// 어떤 티어도 1M을 선언하지 않으면 Claude Code 기본 모델 opus[1m]의 1M 과대 인식을 막는다.
+	p, localAdj.Guard1M = ctxwin.Guard1M(p, modelChoice(args))
 
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)

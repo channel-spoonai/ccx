@@ -81,8 +81,41 @@ func TestProjectLocalSettingsOverrideUser(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(".claude", "settings.local.json"), []byte(autoSettings), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := effectiveDefaultMode(); got != "auto" {
-		t.Errorf("effectiveDefaultMode = %q, want auto", got)
+	if got := effectiveSettings().Permissions.DefaultMode; got != "auto" {
+		t.Errorf("defaultMode = %q, want auto", got)
+	}
+}
+
+// 필드별로 겹쳐 읽는다 — local이 defaultMode만 두면 user의 model은 그대로 남아야 한다.
+func TestSettingsMergePerField(t *testing.T) {
+	withClaudeSettings(t, `{"model":"sonnet","permissions":{"defaultMode":"default"}}`)
+	if err := os.MkdirAll(".claude", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(".claude", "settings.local.json"), []byte(autoSettings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := effectiveSettings()
+	if got.Model != "sonnet" || got.Permissions.DefaultMode != "auto" {
+		t.Errorf("settings = %+v, want model=sonnet defaultMode=auto", got)
+	}
+}
+
+func TestModelArg(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"--model", "sonnet", "-p", "hi"}, "sonnet"},
+		{[]string{"-p", "hi", "--model=opus[1m]"}, "opus[1m]"},
+		{[]string{"--", "--model", "x"}, ""},
+		{[]string{"--model"}, ""},
+	}
+	for _, c := range cases {
+		if got := modelArg(c.args); got != c.want {
+			t.Errorf("modelArg(%v) = %q, want %q", c.args, got, c.want)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/channel-spoonai/ccx/internal/config"
+	"github.com/channel-spoonai/ccx/internal/ctxwin"
 )
 
 // 로컬 모델 서버용 기본값.
@@ -32,7 +33,7 @@ type localAdjustments struct {
 	PermissionFrom string // 비어 있으면 권한 모드를 건드리지 않음
 	PermissionTo   string
 	AwaySummaryOff bool
-	Disable1M      bool // ctxwin.Guard1M이 CLAUDE_CODE_DISABLE_1M_CONTEXT를 주입함 (로컬 여부 무관)
+	Guard1M        ctxwin.Guard // 기본 opus[1m] 차단 내역 (로컬 여부 무관)
 }
 
 // applyLocalDefaults는 로컬 프로파일이면 auto 모드와 away summary를 끈다.
@@ -54,7 +55,7 @@ func applyLocalDefaults(p *config.Profile, args []string) (*config.Profile, []st
 	}
 
 	if strings.TrimSpace(p.PermissionMode) == "" && !hasPermissionArg(args) {
-		if effectiveDefaultMode() == "auto" {
+		if effectiveSettings().Permissions.DefaultMode == "auto" {
 			args = withPermissionMode(args, localPermissionFallback)
 			adj.PermissionFrom, adj.PermissionTo = "auto", localPermissionFallback
 		}
@@ -100,9 +101,18 @@ func withPermissionMode(args []string, mode string) []string {
 	return append([]string{"--permission-mode", mode}, args...)
 }
 
-// effectiveDefaultMode는 Claude Code 설정 파일의 permissions.defaultMode를 우선순위대로 읽는다
-// (user < project < local). managed 정책은 CLI 인자로도 못 바꾸므로 보지 않는다.
-func effectiveDefaultMode() string {
+// claudeSettings는 ccx가 참고하는 Claude Code 설정 필드.
+type claudeSettings struct {
+	Model       string `json:"model"`
+	Permissions struct {
+		DefaultMode string `json:"defaultMode"`
+	} `json:"permissions"`
+}
+
+// effectiveSettings는 Claude Code 설정 파일을 우선순위대로 겹쳐 읽는다
+// (user < project < local, 필드별로 비어 있지 않은 값이 이긴다). managed 정책은
+// CLI 인자로도 못 바꾸므로 보지 않는다.
+func effectiveSettings() claudeSettings {
 	var files []string
 	if dir := claudeConfigDir(); dir != "" {
 		files = append(files, filepath.Join(dir, "settings.json"))
@@ -112,13 +122,38 @@ func effectiveDefaultMode() string {
 			filepath.Join(cwd, ".claude", "settings.json"),
 			filepath.Join(cwd, ".claude", "settings.local.json"))
 	}
-	mode := ""
+	var eff claudeSettings
 	for _, f := range files {
-		if m := readDefaultMode(f); m != "" {
-			mode = m
+		s := readSettings(f)
+		if s.Model != "" {
+			eff.Model = s.Model
+		}
+		if s.Permissions.DefaultMode != "" {
+			eff.Permissions.DefaultMode = s.Permissions.DefaultMode
 		}
 	}
-	return mode
+	return eff
+}
+
+// modelChoice는 Claude Code가 시작 모델을 정할 때 보는, 프로파일 밖의 사용자 지정을 모은다.
+func modelChoice(args []string) ctxwin.ModelChoice {
+	return ctxwin.ModelChoice{CLI: modelArg(args), Settings: effectiveSettings().Model}
+}
+
+// modelArg는 CLI의 --model 값을 찾는다 ("--" 뒤는 claude 인자가 아니다).
+func modelArg(args []string) string {
+	for i, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "--model" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, "--model="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func claudeConfigDir() string {
@@ -132,20 +167,15 @@ func claudeConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-func readDefaultMode(path string) string {
+func readSettings(path string) claudeSettings {
+	var s claudeSettings
 	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
+	if err != nil || json.Unmarshal(data, &s) != nil {
+		return claudeSettings{}
 	}
-	var s struct {
-		Permissions struct {
-			DefaultMode string `json:"defaultMode"`
-		} `json:"permissions"`
-	}
-	if json.Unmarshal(data, &s) != nil {
-		return ""
-	}
-	return strings.TrimSpace(s.Permissions.DefaultMode)
+	s.Model = strings.TrimSpace(s.Model)
+	s.Permissions.DefaultMode = strings.TrimSpace(s.Permissions.DefaultMode)
+	return s
 }
 
 func printLocalAdjustments(adj localAdjustments) {
@@ -155,7 +185,10 @@ func printLocalAdjustments(adj localAdjustments) {
 	if adj.AwaySummaryOff {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m Away summary (recap): off (local model — keeps the session cache aligned)\n")
 	}
-	if adj.Disable1M {
+	if adj.Guard1M.Disable1M {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m 1M context: off (no model declares ≥1M — overrides Claude Code's default opus[1m])\n")
+	}
+	if m := adj.Guard1M.PinModel; m != "" {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Startup model: %s (no model declares ≥1M — avoids Claude Code's default opus[1m])\n", m)
 	}
 }

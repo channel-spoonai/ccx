@@ -20,6 +20,7 @@ func neutralize(t *testing.T, key string) {
 func hermetic(t *testing.T) {
 	t.Helper()
 	neutralize(t, EnvKey)
+	neutralize(t, MaxTokensEnv)
 	neutralize(t, AutoEnv)
 }
 
@@ -58,12 +59,14 @@ func TestApplyDeliveryFormula(t *testing.T) {
 		name      string
 		model     string
 		wantModel string
+		wantMax   string // "" = 주입 없음
 		wantACW   string // "" = 주입 없음
 	}{
-		{"1M 이상은 [1m]만", "foo[1m]", "foo[1m]", ""},
-		{"정확히 200K는 표기 제거만", "foo[200k]", "foo", ""},
-		{"200K 미만은 제거 + ACW", "local[128k]", "local", "128000"},
-		{"200K~1M은 [1m] + ACW", "gpt-x[272k]", "gpt-x[1m]", "272000"},
+		{"1M 이상은 [1m]만", "foo[1m]", "foo[1m]", "", ""},
+		{"정확히 200K는 표기 제거만", "foo[200k]", "foo", "", ""},
+		{"200K 미만은 제거 + MAX + ACW", "local[128k]", "local", "128000", "128000"},
+		// [1m]을 달면 statusline이 1M을 표시한다 — MAX만으로 윈도우를 전달해야 한다
+		{"200K~1M은 제거 + MAX", "gpt-x[272k]", "gpt-x", "272000", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -72,8 +75,10 @@ func TestApplyDeliveryFormula(t *testing.T) {
 			if out.Models.Sonnet != c.wantModel {
 				t.Errorf("sonnet = %q, want %q", out.Models.Sonnet, c.wantModel)
 			}
-			got := out.Env[EnvKey]
-			if got != c.wantACW {
+			if got := out.Env[MaxTokensEnv]; got != c.wantMax {
+				t.Errorf("MAX = %q, want %q", got, c.wantMax)
+			}
+			if got := out.Env[EnvKey]; got != c.wantACW {
 				t.Errorf("ACW = %q, want %q", got, c.wantACW)
 			}
 			if res == nil || len(res.Tiers) != 1 || res.Tiers[0].Source != "suffix" {
@@ -99,6 +104,9 @@ func TestApplyCatalogFallback(t *testing.T) {
 	if _, ok := out.Env[EnvKey]; ok {
 		t.Errorf("ACW injected for 200K models: %v", out.Env)
 	}
+	if _, ok := out.Env[MaxTokensEnv]; ok {
+		t.Errorf("MAX injected for 200K models: %v", out.Env)
+	}
 	if res == nil || len(res.Tiers) != 3 {
 		t.Fatalf("want 3 catalog tiers, got %+v", res)
 	}
@@ -117,6 +125,9 @@ func TestApplyCatalogLargeModel(t *testing.T) {
 	if _, ok := out.Env[EnvKey]; ok {
 		t.Errorf("1M model should not need ACW: %v", out.Env)
 	}
+	if _, ok := out.Env[MaxTokensEnv]; ok {
+		t.Errorf("1M model should not need MAX: %v", out.Env)
+	}
 }
 
 func TestApplyMinRuleExcludesHaiku(t *testing.T) {
@@ -129,6 +140,9 @@ func TestApplyMinRuleExcludesHaiku(t *testing.T) {
 	out, res := Apply(p)
 	if got := out.Env[EnvKey]; got != "128000" {
 		t.Errorf("ACW = %q, want 128000 (haiku 64k must be excluded)", got)
+	}
+	if got := out.Env[MaxTokensEnv]; got != "128000" {
+		t.Errorf("MAX = %q, want 128000 (haiku 64k must be excluded)", got)
 	}
 	if res.HaikuBelow != 64_000 {
 		t.Errorf("HaikuBelow = %d, want 64000", res.HaikuBelow)
@@ -143,21 +157,23 @@ func TestApplyCodexBackendCap(t *testing.T) {
 		Haiku:  "gpt-5.6-luna",
 	}}
 	out, _ := Apply(p)
-	if got := out.Env[EnvKey]; got != "272000" {
-		t.Errorf("ACW = %q, want 272000 (ChatGPT backend cap)", got)
+	if got := out.Env[MaxTokensEnv]; got != "272000" {
+		t.Errorf("MAX = %q, want 272000 (ChatGPT backend cap)", got)
 	}
-	if out.Models.Opus != "gpt-5.6-sol[1m]" {
-		t.Errorf("opus = %q, want [1m] kept", out.Models.Opus)
+	if _, ok := out.Env[EnvKey]; ok {
+		t.Errorf("ACW not needed above 200K: %v", out.Env)
 	}
-	// haiku는 카탈로그(1.05M)→캡(272K)으로 200K<W<1M 구간이 되는데, haiku에는
-	// ACW 하향을 짝지어 줄 수 없으므로 [1m]을 붙이지 않는다 (200K 추정이 안전)
+	// 캡이 걸려 1M 미만이 되면 [1m]을 떼야 한다 — 남기면 1M으로 과대 인식된다
+	if out.Models.Opus != "gpt-5.6-sol" {
+		t.Errorf("opus = %q, want gpt-5.6-sol ([1m] dropped under cap)", out.Models.Opus)
+	}
 	if out.Models.Haiku != "gpt-5.6-luna" {
 		t.Errorf("haiku = %q, want gpt-5.6-luna (no [1m])", out.Models.Haiku)
 	}
 }
 
-// haiku가 200K<W<1M인데 메인 티어가 전부 1M이라 ACW가 주입되지 않는 구성 —
-// haiku에 [1m]만 붙이면 262K 모델을 1M으로 과대 선언하게 되므로 붙이면 안 된다.
+// haiku가 200K<W<1M인데 메인 티어가 전부 1M인 구성 — 메인은 [1m]이 MAX보다 우선하므로
+// MAX를 읽는 커스텀 티어가 haiku뿐이라 haiku 윈도우를 싣는다. [1m]은 붙이면 안 된다.
 func TestApplyHaikuMidWindowNotOverstated(t *testing.T) {
 	hermetic(t)
 	p := &config.Profile{Name: "t", Models: &config.Models{
@@ -167,35 +183,74 @@ func TestApplyHaikuMidWindowNotOverstated(t *testing.T) {
 	}}
 	out, res := Apply(p)
 	if out.Models.Haiku != "kimi-k2.5" {
-		t.Errorf("haiku = %q, want kimi-k2.5 (no [1m] without paired ACW)", out.Models.Haiku)
+		t.Errorf("haiku = %q, want kimi-k2.5 (no [1m])", out.Models.Haiku)
+	}
+	if got := out.Env[MaxTokensEnv]; got != "262144" {
+		t.Errorf("MAX = %q, want 262144 (haiku is the only custom tier reading it)", got)
 	}
 	if _, ok := out.Env[EnvKey]; ok {
-		t.Errorf("no ACW expected (mains are 1M): %v", out.Env)
+		t.Errorf("no ACW expected: %v", out.Env)
 	}
 	if res.HaikuBelow != 262_144 {
 		t.Errorf("HaikuBelow = %d, want 262144", res.HaikuBelow)
 	}
 }
 
-// 사용자 ACW가 티어의 실제 윈도우보다 크면 [1m] 부착이 오히려 오버플로를
-// 무장시킨다(200K 추정이었으면 무해했을 값) — 부착을 생략해야 한다.
-func TestApplyUserACWLargerThanWindow(t *testing.T) {
+// 메인 티어 중 하나라도 1M 미만이면 haiku가 MAX를 정하면 안 된다 — 메인 세션을 캡한다.
+func TestApplyMaxIgnoresHaikuWhenMainCustom(t *testing.T) {
+	hermetic(t)
+	p := &config.Profile{Name: "t", Models: &config.Models{
+		Opus:   "big[1m]",
+		Sonnet: "local[200k]",
+		Haiku:  "small[128k]",
+	}}
+	out, _ := Apply(p)
+	if _, ok := out.Env[MaxTokensEnv]; ok {
+		t.Errorf("MAX must stay unset (sonnet 200K is the default): %v", out.Env)
+	}
+}
+
+func TestApplyUserMaxWins(t *testing.T) {
+	hermetic(t)
+	p := &config.Profile{Name: "t",
+		Models: &config.Models{Sonnet: "local[262k]"},
+		Env:    map[string]string{MaxTokensEnv: "250000"},
+	}
+	out, res := Apply(p)
+	if got := out.Env[MaxTokensEnv]; got != "250000" {
+		t.Errorf("MAX = %q, want user value 250000", got)
+	}
+	if !res.MaxUserSet || res.MaxContext != 0 {
+		t.Errorf("res = %+v, want MaxUserSet=true MaxContext=0", res)
+	}
+	if out.Models.Sonnet != "local" {
+		t.Errorf("sonnet = %q, want local", out.Models.Sonnet)
+	}
+
+	neutralize(t, MaxTokensEnv)
+	t.Setenv(MaxTokensEnv, "100000")
+	p2 := &config.Profile{Name: "t", Models: &config.Models{Sonnet: "local[262k]"}}
+	out2, res2 := Apply(p2)
+	if _, ok := out2.Env[MaxTokensEnv]; ok || !res2.MaxUserSet {
+		t.Errorf("must not override ambient MAX: env=%v res=%+v", out2.Env, res2)
+	}
+}
+
+// 사용자 ACW는 더 이상 [1m] 부착 여부를 좌우하지 않는다 — 200K~1M은 [1m]을 달지 않는다.
+func TestApplyUserACWDoesNotAttach1M(t *testing.T) {
 	neutralize(t, AutoEnv)
-	t.Setenv(EnvKey, "500000")
+	neutralize(t, MaxTokensEnv)
+	t.Setenv(EnvKey, "200000")
 	p := &config.Profile{Name: "t", Models: &config.Models{Sonnet: "local[262k]"}}
 	out, res := Apply(p)
 	if out.Models.Sonnet != "local" {
-		t.Errorf("sonnet = %q, want local (no [1m]: user ACW 500000 > window 262000)", out.Models.Sonnet)
+		t.Errorf("sonnet = %q, want local", out.Models.Sonnet)
+	}
+	if got := out.Env[MaxTokensEnv]; got != "262000" {
+		t.Errorf("MAX = %q, want 262000", got)
 	}
 	if !res.UserSet {
 		t.Errorf("res = %+v, want UserSet", res)
-	}
-
-	// 사용자 ACW가 윈도우 이하이면 [1m]+사용자 값 조합이 안전하므로 부착 유지
-	t.Setenv(EnvKey, "250000")
-	out2, _ := Apply(p)
-	if out2.Models.Sonnet != "local[1m]" {
-		t.Errorf("sonnet = %q, want local[1m] (user ACW 250000 <= window 262000)", out2.Models.Sonnet)
 	}
 }
 
@@ -257,6 +312,9 @@ func TestApplyKillSwitch(t *testing.T) {
 	if _, ok := out.Env[EnvKey]; ok {
 		t.Errorf("kill switch must not inject ACW: %v", out.Env)
 	}
+	if _, ok := out.Env[MaxTokensEnv]; ok {
+		t.Errorf("kill switch must not inject MAX: %v", out.Env)
+	}
 	if p.Models.Sonnet != "local[128k]" {
 		t.Errorf("original mutated: %q", p.Models.Sonnet)
 	}
@@ -317,67 +375,101 @@ func TestApplyEnvReference(t *testing.T) {
 	}
 }
 
-func TestGuard1M(t *testing.T) {
+func guardHermetic(t *testing.T) {
+	t.Helper()
 	hermetic(t)
 	neutralize(t, Disable1MEnv)
+	neutralize(t, PinModelEnv)
+}
+
+func TestGuard1M(t *testing.T) {
+	guardHermetic(t)
 
 	tiers := func(opus, sonnet, haiku string) *config.Profile {
 		return &config.Profile{Models: &config.Models{Opus: opus, Sonnet: sonnet, Haiku: haiku}}
 	}
+	none := ModelChoice{}
 	cases := []struct {
-		name string
-		p    *config.Profile
-		want bool
+		name   string
+		p      *config.Profile
+		choice ModelChoice
+		want   Guard
 	}{
-		{"미상 ID (MTPLX)", tiers("p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next"), true},
-		{"200K 카탈로그", tiers("glm-4.7", "glm-4.7", "glm-4.5"), true},
-		{"model 필드만", &config.Profile{Model: "local"}, true},
-		{"한 티어라도 [1m]", tiers("gpt-5.6-sol", "glm-4.7", "glm-4.7"), false},
-		{"262k → [1m]+ACW", tiers("kimi-k2.5", "kimi-k2.5", "kimi-k2.5"), false},
-		{"대문자 [1M] suffix", tiers("local[1M]", "local", "local"), false},
-		{"모델 미설정", &config.Profile{}, false},
+		{"미상 ID (MTPLX)", tiers("p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next", "p0ly31-qwen3.8-flash-next"), none, Guard{Disable1M: true}},
+		{"200K 카탈로그", tiers("glm-4.7", "glm-4.7", "glm-4.5"), none, Guard{Disable1M: true}},
+		{"200K 미만은 1M 끄기 (경고 조건 아님)", tiers("local[128k]", "local[128k]", "local[128k]"), none, Guard{Disable1M: true}},
+		{"model 필드만", &config.Profile{Model: "local"}, none, Guard{Disable1M: true}},
+		{"한 티어라도 [1m]", tiers("gpt-5.6-sol", "glm-4.7", "glm-4.7"), none, Guard{}},
+		{"대문자 [1M] suffix", tiers("local[1M]", "local", "local"), none, Guard{}},
+		{"모델 미설정", &config.Profile{}, none, Guard{}},
+		// 200K 초과 윈도우에 1M 끄기를 쓰면 Claude Code가 매 시작마다 경고한다 — 시작 모델 고정
+		{"262k, 고른 모델 없음", tiers("kimi-k2.5", "kimi-k2.5", "kimi-k2.5"), none, Guard{PinModel: "opus"}},
+		{"262k, settings 모델 유지", tiers("local[262k]", "local[262k]", "local[262k]"), ModelChoice{Settings: "sonnet"}, Guard{PinModel: "sonnet"}},
+		{"262k, settings가 [1m]이면 1M 끄기", tiers("local[262k]", "local[262k]", "local[262k]"), ModelChoice{Settings: "opus[1m]"}, Guard{Disable1M: true}},
+		{"262k, CLI --model이 [1m] 없음", tiers("local[262k]", "local[262k]", "local[262k]"), ModelChoice{CLI: "sonnet", Settings: "opus[1m]"}, Guard{}},
+		{"262k, CLI --model이 [1m]", tiers("local[262k]", "local[262k]", "local[262k]"), ModelChoice{CLI: "opus[1m]"}, Guard{Disable1M: true}},
+		{"262k, profile.model 지정", &config.Profile{Model: "local[262k]"}, none, Guard{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			applied, _ := Apply(c.p)
-			out, got := Guard1M(applied)
+			out, got := Guard1M(applied, c.choice)
 			if got != c.want {
-				t.Fatalf("Guard1M = %v, want %v", got, c.want)
+				t.Fatalf("Guard1M = %+v, want %+v", got, c.want)
 			}
-			if got && out.Env[Disable1MEnv] != "1" {
-				t.Fatalf("env 미주입: %v", out.Env)
+			if (out.Env[Disable1MEnv] == "1") != got.Disable1M {
+				t.Fatalf("%s 주입 불일치: %v", Disable1MEnv, out.Env)
 			}
-			if !got && out.Env[Disable1MEnv] != "" {
-				t.Fatalf("주입되면 안 됨: %v", out.Env)
+			if out.Env[PinModelEnv] != got.PinModel {
+				t.Fatalf("%s = %q, want %q", PinModelEnv, out.Env[PinModelEnv], got.PinModel)
 			}
 		})
 	}
 }
 
 func TestGuard1MRespectsUser(t *testing.T) {
-	hermetic(t)
-	neutralize(t, Disable1MEnv)
+	guardHermetic(t)
 
 	env := map[string]string{Disable1MEnv: "0"}
 	p := &config.Profile{Model: "local", Env: env}
-	if _, got := Guard1M(p); got {
+	if _, got := Guard1M(p, ModelChoice{}); got != (Guard{}) {
 		t.Fatal("profile.env 명시값을 덮으면 안 됨")
 	}
 
+	// profile.env의 ANTHROPIC_MODEL은 이미 고른 시작 모델 — 고정하면 안 됨
+	p2 := &config.Profile{Models: &config.Models{Opus: "local"},
+		Env: map[string]string{MaxTokensEnv: "262144", PinModelEnv: "sonnet"}}
+	if _, got := Guard1M(p2, ModelChoice{}); got != (Guard{}) {
+		t.Fatalf("profile.env ANTHROPIC_MODEL을 덮으면 안 됨: %+v", got)
+	}
+
 	t.Setenv(Disable1MEnv, "0")
-	if _, got := Guard1M(&config.Profile{Model: "local"}); got {
+	if _, got := Guard1M(&config.Profile{Model: "local"}, ModelChoice{}); got != (Guard{}) {
 		t.Fatal("ambient 명시값을 덮으면 안 됨")
 	}
 }
 
+func TestGuard1MAmbientModel(t *testing.T) {
+	guardHermetic(t)
+	p := &config.Profile{Models: &config.Models{Opus: "local"}, Env: map[string]string{MaxTokensEnv: "262144"}}
+
+	t.Setenv(PinModelEnv, "sonnet")
+	if _, got := Guard1M(p, ModelChoice{}); got != (Guard{}) {
+		t.Fatalf("ambient ANTHROPIC_MODEL([1m] 없음)이면 아무것도 안 해야 함: %+v", got)
+	}
+	t.Setenv(PinModelEnv, "opus[1m]")
+	if _, got := Guard1M(p, ModelChoice{}); got != (Guard{Disable1M: true}) {
+		t.Fatalf("ambient ANTHROPIC_MODEL이 [1m]이면 1M을 꺼야 함: %+v", got)
+	}
+}
+
 func TestGuard1MDoesNotMutateInput(t *testing.T) {
-	hermetic(t)
-	neutralize(t, Disable1MEnv)
+	guardHermetic(t)
 
 	env := map[string]string{"API_TIMEOUT_MS": "1"}
 	p := &config.Profile{Model: "local", Env: env}
-	out, got := Guard1M(p)
-	if !got || out == p {
+	out, got := Guard1M(p, ModelChoice{})
+	if !got.Disable1M || out == p {
 		t.Fatal("copy에 주입해야 함")
 	}
 	if _, leaked := env[Disable1MEnv]; leaked {
@@ -386,10 +478,9 @@ func TestGuard1MDoesNotMutateInput(t *testing.T) {
 }
 
 func TestGuard1MKillSwitch(t *testing.T) {
-	hermetic(t)
-	neutralize(t, Disable1MEnv)
+	guardHermetic(t)
 	t.Setenv(AutoEnv, "0")
-	if _, got := Guard1M(&config.Profile{Model: "local"}); got {
+	if _, got := Guard1M(&config.Profile{Model: "local"}, ModelChoice{}); got != (Guard{}) {
 		t.Fatal("CCX_CONTEXT_AUTO=0이면 주입하면 안 됨")
 	}
 }

@@ -147,9 +147,8 @@ func printBanner(p *config.Profile, res *ctxwin.Resolution) {
 	}
 	if p.Models != nil {
 		var parts []string
-		// ctxwin이 재작성한 "[1m]"은 Claude Code가 인식하는 유일한 표기라서 붙는 것이지
-		// 그 모델이 1M을 처리한다는 뜻이 아니다. 그대로 보여주면 262K 모델이 1M으로 읽혀
-		// 오해를 부르므로 여기서는 떼고, 실제 윈도우는 바로 아래 Context 줄이 말한다.
+		// ctxwin이 남기는 "[1m]"은 Claude Code가 1M으로 인식하는 유일한 표기라 붙는 것이고,
+		// 실제 윈도우는 바로 아래 Context 줄이 말한다. 표기를 떼고 모델 ID만 보여준다.
 		if s := stripCtxSuffix(p.Models.Opus); s != "" {
 			parts = append(parts, "opus→"+s)
 		}
@@ -187,11 +186,20 @@ func printContextLine(res *ctxwin.Resolution) {
 	for _, t := range res.Tiers {
 		parts = append(parts, fmt.Sprintf("%s %s (%s)", t.Label, formatWindow(t.Window), t.Source))
 	}
-	line := strings.Join(parts, ", ")
+	var applied []string
+	if res.MaxContext > 0 {
+		applied = append(applied, fmt.Sprintf("window %d", res.MaxContext))
+	} else if res.MaxUserSet {
+		applied = append(applied, "window set by user")
+	}
 	if res.AutoCompact > 0 {
-		line += fmt.Sprintf(" → auto-compact %d", res.AutoCompact)
+		applied = append(applied, fmt.Sprintf("auto-compact %d", res.AutoCompact))
 	} else if res.UserSet {
-		line += " → auto-compact set by user"
+		applied = append(applied, "auto-compact set by user")
+	}
+	line := strings.Join(parts, ", ")
+	if len(applied) > 0 {
+		line += " → " + strings.Join(applied, ", ")
 	}
 	fmt.Printf("\x1B[36m[ccx]\x1B[0m Context: %s\n", line)
 	if res.HaikuBelow > 0 {

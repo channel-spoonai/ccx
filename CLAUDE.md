@@ -313,12 +313,20 @@ ChatGPT 구독 대신 종량제 OpenAI API 키로 같은 변환 경로를 쓴다
 
 ## Context Windows (`internal/ctxwin`)
 
-Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추론하고 커스텀 ID는 200K로 가정한다. 오버라이드 수단은 둘뿐이다(2026-07 로컬 리스너 실측 완료):
+Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추론하고 커스텀 ID는 200K로 가정한다. 오버라이드 수단은 셋이다(2026-10 Claude Code 2.1.289 실측):
 
-- `[1m]` suffix — 유일하게 공식 인식되는 suffix. Claude Code가 1M으로 인식하고 **API 전송 전 strip한다** (직결 프로바이더에도 안전). `[200k]` 같은 다른 suffix는 인식하지 않고 **업스트림에 리터럴로 보낸다** — 그래서 ccx가 env 주입 전에 반드시 제거해야 한다.
-- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — 인식 용량 설정, 단 모델 추론 윈도우로 캡되어 **하향만 가능**.
+- `[1m]` suffix — 1M으로 인식하고 **API 전송 전 strip한다** (직결 프로바이더에도 안전). `[200k]` 같은 다른 suffix는 인식하지 않고 **업스트림에 리터럴로 보낸다** — 그래서 ccx가 env 주입 전에 반드시 제거해야 한다. `[1m]`이 붙으면 아래 MAX보다 우선한다.
+- `CLAUDE_CODE_MAX_CONTEXT_TOKENS` — 비-Claude 모델 ID의 **윈도우 자체**를 바꾼다. statusline `context_window_size`, `/context`, 자동 압축 기준이 모두 이 값을 따른다. 전역 단일값이라 `[1m]`이 없는 커스텀 티어 전부에 적용된다.
+- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` — 자동 압축 기준만 바꾸고 모델 윈도우로 캡되어 **하향만 가능**. statusline 윈도우는 바꾸지 못한다.
 
-`ctxwin.Apply`(Launch 최상단, 4개 auth 경로 공통)가 프로파일 copy의 모델 ID suffix(없으면 `catalog.go`의 정적 수치)를 전달 공식으로 변환한다: W≥1M → `[1m]` / 200K<W<1M → `[1m]`+ACW=W / W==200K → 표기 제거만 / W<200K → ACW=W. **200K<W<1M 구간의 `[1m]`+ACW는 분리 불가능한 짝** — 이 불변식 때문에 (a) ACW 후보에서 제외되는 haiku는 W≥1M일 때만 `[1m]`을 받고(짝 없는 `[1m]`은 1M 과대 인식), (b) 사용자 명시 ACW가 티어 실제 윈도우보다 크면 그 티어의 `[1m]` 부착을 생략한다(200K 추정이 안전). ACW는 전역 단일값이라 opus/sonnet/model 중 min을 채택하고 haiku는 제외(소형 haiku가 세션 전체를 캡하는 것 방지, 대신 배너 경고). codex-oauth는 소스 무관 `min(W, 272000)` 캡. 우선순위: 사용자 명시값(`profile.env` > ambient — BuildEnv의 p.Env 루프가 마지막이라) > 계산값. **기본 모델 `opus[1m]` 가드**(`ctxwin.Guard1M`, Apply 직후 호출): "커스텀 ID는 200K 가정"은 opus 티어에는 성립하지 않는다. Claude Code 2.1.283의 기본 모델이 `opus[1m]`이라, 모델을 고르지 않으면 `ANTHROPIC_DEFAULT_OPUS_MODEL` 뒤에 `[1m]`을 스스로 붙여 1M으로 해석한다(실측: `/model` → `<id>[1m] (default)`). statusline의 `context_window_size`가 1M이 되고, ACW가 없으면 자동 압축도 1M 기준이라 오버플로가 난다. 그래서 모델 ID가 하나 이상 있고 **최종 ID 어디에도 `[1m]`이 없으면** `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`을 주입한다(배너 `1M context: off`). 한 티어라도 `[1m]`이면 주입하지 않는다 — 끄면 `[1m]` 인식 자체가 사라져 `[1m]`+ACW 짝이 깨지기 때문이며, 그 대가로 혼합 프로파일의 비-1M 티어는 ACW에만 의존한다. 사용자가 profile.env/ambient에 키를 두면 그 값이 우선. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
+`ctxwin.Apply`(Launch 최상단, 4개 auth 경로 공통)가 프로파일 copy의 모델 ID suffix(없으면 `catalog.go`의 정적 수치)를 전달 공식으로 변환한다: W≥1M → `[1m]` / 200K<W<1M → 표기 제거 + MAX=W / W==200K → 표기 제거만 / W<200K → 표기 제거 + MAX=W + ACW=W. 200K<W<1M은 한때 `[1m]`+ACW 짝으로 전달했는데, 압축은 맞아도 모델 윈도우가 1M으로 잡혀 **statusline이 262K 모델을 1M으로 표시**했다(MLX-Serve 실측). W<200K의 ACW는 MAX를 모르는 구버전 Claude Code에서도 압축이 W에서 일어나게 하려고 남긴다. MAX·ACW는 전역 단일값이라 opus/sonnet/model 중 min을 채택하고 haiku는 제외(소형 haiku가 세션 전체를 캡하는 것 방지, 대신 배너 경고) — 단 메인 티어가 전부 `[1m]`이면 MAX를 읽는 커스텀 티어가 haiku뿐이라 haiku 윈도우를 싣는다. codex-oauth는 소스 무관 `min(W, 272000)` 캡(그래서 `gpt-5.6-*[1m]`도 `[1m]`이 떨어지고 MAX=272000). 우선순위: 사용자 명시값(`profile.env` > ambient — BuildEnv의 p.Env 루프가 마지막이라) > 계산값, 키별로 따로 판정.
+
+**기본 모델 `opus[1m]` 가드**(`ctxwin.Guard1M`, Apply 직후 호출): Claude Code의 기본 모델이 `opus[1m]`이라, 모델을 고르지 않으면 `ANTHROPIC_DEFAULT_OPUS_MODEL` 뒤에 `[1m]`을 스스로 붙여 1M으로 해석한다(실측: `/model` → `<id>[1m] (default)`). `[1m]`은 MAX보다 우선하므로 그대로 두면 statusline이 1M이 된다. 모델 ID가 하나 이상 있고 **최종 ID 어디에도 `[1m]`이 없으면** 막는데, 방법이 둘이다:
+
+- 기본은 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`(배너 `1M context: off`).
+- 단 Claude Code는 이 키를 "200K 상한을 지키겠다"로 읽어, **모델 윈도우가 200K를 넘으면 매 시작마다** `CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the 200K limit isn't enforced ...` 경고를 띄운다. 그래서 MAX>200K면 대신 시작 모델을 `ANTHROPIC_MODEL`로 고정한다(settings.json의 `model`, 없으면 `opus` — 배너 `Startup model:`). 사용자가 `--model`/`ANTHROPIC_MODEL`/`profile.model`로 `[1m]` 없는 모델을 이미 골랐다면 아무것도 하지 않고, `[1m]`이 든 모델을 골랐다면 경고를 감수하고 1M을 끈다. 세션 중 `/model`로 1M 옵션을 고르는 것까지는 막지 못한다.
+
+한 티어라도 `[1m]`이면 가드를 걸지 않는다(그 티어는 정말 1M). 사용자가 profile.env/ambient에 `CLAUDE_CODE_DISABLE_1M_CONTEXT`를 두면 그 값이 우선. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
 
 프로파일 생성 flows에서는 OpenRouter(`EffectiveContext` — 모델/1순위 프로바이더 중 min), LM Studio(`FetchLMStudioContexts` — 네이티브 `/api/v1/models`의 `loaded_instances[].config.context_length`, 실할당값만 신뢰, v0 폴백), NVIDIA NIM(`NVIDIAContextWindow` — 아래 실측 테이블)이 감지값을 `ContextSuffix`로 모델 ID에 박제한다.
 
@@ -326,7 +334,7 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 `confirmContextWindows`(flows)가 모델 선택 직후 티어별이 아니라 **모델별로 한 번씩** 컨텍스트를 확인받는다. 감지값이 있으면 기본값으로 채워 Enter만 누르면 되고, 비워 두면 표기를 생략한다(= Claude Code의 200K 가정). 입력은 `262144`/`262k`/`1m`을 받는다(`ParseContextInput`). `ContextSuffix`가 k 단위 내림이라 262144는 `[262k]`로 기록된다 — 과대 선언은 오버플로가 되므로 이 방향이 안전하다.
 
-**배너의 Models 줄은 컨텍스트 표기를 떼고 보여준다**(`stripCtxSuffix`). ctxwin이 붙이는 `[1m]`은 Claude Code가 인식하는 유일한 표기라서 붙는 것이지 그 모델이 1M을 처리한다는 뜻이 아니다. 그대로 노출하면 262K 모델이 1M으로 읽혀 오해를 부른다 — 실제 윈도우는 바로 아래 `Context:` 줄이 말한다.
+**배너의 Models 줄은 컨텍스트 표기를 떼고 보여준다**(`stripCtxSuffix`). 실제 윈도우와 주입값은 바로 아래 `Context:` 줄이 말한다(`→ window N, auto-compact M`).
 
 템플릿 baseUrl이 로컬 주소(`config.IsLocalBaseURL` — 런치의 `IsLocalProfile`과 같은 기준)면 등록 시 **주소를 먼저 확인받는다**(LM Studio·MTPLX·lightning-mlx). 기본값은 localhost지만 같은 LAN의 다른 머신에서 서버를 돌리는 경우가 흔하고, 인증 기본값(`findPriorAuth`)이 호스트 기준이라 그보다 먼저 물어야 한다.
 

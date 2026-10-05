@@ -2,22 +2,27 @@
 // Claude Code가 올바른 윈도우를 인식하도록 모델 ID와 환경변수를 정규화한다.
 //
 // Claude Code는 모델 ID 패턴 하드코딩으로 윈도우를 추론하고 커스텀 ID는
-// 200K로 가정한다. 공식 오버라이드 수단은 두 가지뿐이다(실측 검증 완료):
+// 200K로 가정한다. 오버라이드 수단은 셋이다(2.1.289 실측):
 //   - "[1m]" suffix — 1M으로 인식되며 Claude Code가 API 전송 전 strip한다.
 //     "[200k]" 같은 다른 suffix는 인식하지 않고 업스트림에 리터럴로 보낸다.
-//   - CLAUDE_CODE_AUTO_COMPACT_WINDOW — 인식 용량을 설정하되 모델 추론
-//     윈도우로 캡되므로 하향 조정만 가능하다.
+//     [1m]이 붙으면 아래 MAX_CONTEXT_TOKENS보다 우선한다.
+//   - CLAUDE_CODE_MAX_CONTEXT_TOKENS — 비-Claude 모델 ID의 윈도우 자체를 바꾼다.
+//     statusline의 context_window_size와 /context, 자동 압축 기준이 모두 이 값을
+//     따른다. 전역 단일값이라 [1m]이 없는 커스텀 티어 전부에 적용된다.
+//   - CLAUDE_CODE_AUTO_COMPACT_WINDOW — 자동 압축 기준만 바꾸며 모델 윈도우로
+//     캡되므로 하향 조정만 가능하다. statusline 윈도우는 바꾸지 못한다.
 //
 // 실제 윈도우 W의 전달 공식:
 //
 //	W ≥ 1M          → "[1m]" 부착
-//	200K < W < 1M   → "[1m]" 부착 + AUTO_COMPACT_WINDOW=W (하향 캡)
+//	200K < W < 1M   → 표기 제거 + MAX_CONTEXT_TOKENS=W
 //	W == 200K       → 표기 제거만 (기본 추정과 일치)
-//	W < 200K        → 표기 제거 + AUTO_COMPACT_WINDOW=W
+//	W < 200K        → 표기 제거 + MAX_CONTEXT_TOKENS=W + AUTO_COMPACT_WINDOW=W
 //
-// 단 200K<W<1M 구간의 "[1m]"+ACW는 분리 불가능한 짝이다 — [1m]만 붙고
-// ACW 하향이 따라오지 못하면 Claude Code가 1M으로 과대 인식해 W 초과
-// 요청이 업스트림에서 하드 실패한다(모든 부착 지점에서 이 짝을 보장할 것).
+// 200K<W<1M 구간은 한때 "[1m]"+ACW 짝으로 전달했다. 자동 압축은 맞았지만 모델
+// 윈도우가 1M으로 잡혀 statusline이 1M을 표시했다. W<200K의 ACW는
+// MAX_CONTEXT_TOKENS를 모르는 구버전 Claude Code에서도 압축이 W에서 일어나게
+// 하려고 남겨 둔다(200K 초과 구간은 구버전이면 200K 추정으로 떨어져 안전하다).
 package ctxwin
 
 import (
@@ -28,8 +33,11 @@ import (
 	"github.com/channel-spoonai/ccx/internal/config"
 )
 
-// EnvKey는 Claude Code가 인식 컨텍스트 용량으로 읽는 환경변수.
+// EnvKey는 Claude Code가 자동 압축 기준 용량으로 읽는 환경변수.
 const EnvKey = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+
+// MaxTokensEnv는 Claude Code가 비-Claude 모델 ID의 컨텍스트 윈도우로 읽는 환경변수.
+const MaxTokensEnv = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
 
 // AutoEnv — "0"/"false"/"off"(대소문자 무시)면 컨텍스트 자동 해석 비활성.
 // 이때도 ccx 전용 suffix 표기의 업스트림 유출만은 막는다 (stripOnly 참조).
@@ -58,27 +66,27 @@ type Tier struct {
 // Resolution은 Apply가 무엇을 왜 했는지 배너에 알려주기 위한 요약.
 type Resolution struct {
 	Tiers       []Tier
-	AutoCompact int  // 계산해 주입한 값 (0 = 주입 없음)
-	UserSet     bool // 사용자가 profile.env/ambient로 이미 설정해 계산값을 양보
+	MaxContext  int  // 계산해 주입한 MAX_CONTEXT_TOKENS (0 = 주입 없음)
+	MaxUserSet  bool // 사용자가 MAX_CONTEXT_TOKENS를 이미 설정해 계산값을 양보
+	AutoCompact int  // 계산해 주입한 ACW (0 = 주입 없음)
+	UserSet     bool // 사용자가 profile.env/ambient로 ACW를 이미 설정해 계산값을 양보
 	HaikuBelow  int  // haiku 윈도우가 세션 유효 윈도우보다 작을 때 그 값 (0 = 정상)
 }
 
 // Apply는 프로파일의 모델 ID들을 전달 공식대로 재작성하고 필요 시
-// CLAUDE_CODE_AUTO_COMPACT_WINDOW를 Env에 주입한 copy를 반환한다.
-// 원본 프로파일은 수정하지 않는다. 컨텍스트 정보가 전혀 없으면 입력을
-// 그대로 반환한다 (Resolution은 nil).
+// CLAUDE_CODE_MAX_CONTEXT_TOKENS / CLAUDE_CODE_AUTO_COMPACT_WINDOW를 Env에 주입한
+// copy를 반환한다. 원본 프로파일은 수정하지 않는다. 컨텍스트 정보가 전혀 없으면
+// 입력을 그대로 반환한다 (Resolution은 nil).
 //
-// AUTO_COMPACT_WINDOW는 프로세스 전역 단일값이므로 opus/sonnet/model 중
-// 최소 필요값을 채택한다. haiku는 백그라운드 단발 호출용이라 제외한다 —
-// 소형 haiku 하나가 메인 세션 전체를 캡하는 것을 막기 위함이며, haiku가
-// 더 작으면 Resolution.HaikuBelow로 경고만 남긴다. 같은 이유로 haiku는
-// ACW 하향을 짝지어 줄 수 없어 W≥1M일 때만 "[1m]"을 받는다 (패키지 주석의
-// 짝 불변식 — 200K<W<1M haiku에 [1m]을 붙이면 1M 과대 인식이 된다).
+// 두 값 모두 프로세스 전역 단일값이므로 opus/sonnet/model 중 최솟값을 채택한다.
+// haiku는 백그라운드 단발 호출용이라 제외한다 — 소형 haiku 하나가 메인 세션 전체를
+// 캡하는 것을 막기 위함이며, haiku가 더 작으면 Resolution.HaikuBelow로 경고만
+// 남긴다. 메인 티어가 전부 [1m]이라 MAX_CONTEXT_TOKENS가 비어 있을 때만 haiku
+// 윈도우를 거기에 싣는다 — 그때는 그 값을 읽는 커스텀 티어가 haiku뿐이다.
 //
-// 사용자 명시값이 항상 이긴다: profile.env 또는 ambient 프로세스 env에
-// EnvKey가 있으면 계산값을 주입하지 않는다 (둘 다 있으면 BuildEnv의 p.Env
-// 루프가 마지막이라 profile.env가 최종값). 이때 사용자 값이 어떤 티어의
-// 실제 윈도우보다 크면 그 티어의 [1m] 부착도 생략한다 — 200K 추정이 안전.
+// 사용자 명시값이 항상 이긴다: profile.env 또는 ambient 프로세스 env에 키가 있으면
+// 그 키의 계산값을 주입하지 않는다 (둘 다 있으면 BuildEnv의 p.Env 루프가 마지막이라
+// profile.env가 최종값).
 func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 	if p == nil {
 		return p, nil
@@ -148,7 +156,7 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 	}
 
 	res := &Resolution{}
-	var needs, mains []int
+	var acwNeeds, maxNeeds, mains []int
 	haikuWindow := 0
 	for _, t := range tiers {
 		if t.label == "haiku" {
@@ -156,39 +164,29 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 			continue
 		}
 		mains = append(mains, t.window)
-		if n := acwNeed(t.window); n > 0 {
-			needs = append(needs, n)
+		if t.window < 1_000_000 {
+			maxNeeds = append(maxNeeds, t.window)
+		}
+		if t.window < defaultWindow {
+			acwNeeds = append(acwNeeds, t.window)
 		}
 	}
 
-	// 사용자 명시값 탐지. profile.env가 ambient보다 우선 (BuildEnv 적용 순서와 일치).
-	userSet, userVal := false, 0
-	if v, ok := p.Env[EnvKey]; ok {
-		userSet = true
-		userVal, _ = strconv.Atoi(config.ResolveSecret(v))
-	} else if v, ok := os.LookupEnv(EnvKey); ok {
-		userSet = true
-		userVal, _ = strconv.Atoi(v)
+	// 메인 티어 중 200K 정확히가 최솟값이면 기본 추정과 같아 주입할 필요가 없다.
+	maxTokens := minOf(maxNeeds)
+	if len(maxNeeds) == 0 && haikuWindow > 0 && haikuWindow < 1_000_000 {
+		maxTokens = haikuWindow
 	}
-	res.UserSet = userSet
-
-	computed := minOf(needs)
-	effective := computed
-	if userSet {
-		effective = userVal // 파싱 실패 시 0 — 아래 [1m] 가드가 보수적으로 동작
+	if maxTokens == defaultWindow {
+		maxTokens = 0
 	}
 
-	// 2차: 재작성. [1m]은 "최종 ACW ≤ 티어 실제 윈도우"가 보장될 때만 부착.
-	// 계산값 경로는 computed = min(needs) ≤ 각 티어 W라 항상 성립한다.
+	// 2차: 재작성. 1M 이상만 [1m]을 단다 — 나머지는 MAX_CONTEXT_TOKENS가 윈도우를 전달하고,
+	// [1m]이 붙으면 그 값보다 우선해 1M으로 잡힌다.
 	for _, t := range tiers {
 		rewritten := t.base
-		switch {
-		case t.window >= 1_000_000:
+		if t.window >= 1_000_000 {
 			rewritten = t.base + "[1m]"
-		case t.window > defaultWindow:
-			if t.label != "haiku" && effective > 0 && effective <= t.window {
-				rewritten = t.base + "[1m]"
-			}
 		}
 		if rewritten != config.ResolveSecret(*t.slot) {
 			*t.slot = rewritten
@@ -196,7 +194,16 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 		res.Tiers = append(res.Tiers, Tier{Label: t.label, Model: rewritten, Window: t.window, Source: t.source})
 	}
 
-	if !userSet && computed > 0 {
+	if userHas(p, MaxTokensEnv) {
+		res.MaxUserSet = true
+	} else if maxTokens > 0 {
+		out.Env[MaxTokensEnv] = strconv.Itoa(maxTokens)
+		res.MaxContext = maxTokens
+	}
+
+	userSet := userHas(p, EnvKey)
+	res.UserSet = userSet
+	if computed := minOf(acwNeeds); !userSet && computed > 0 {
 		out.Env[EnvKey] = strconv.Itoa(computed)
 		res.AutoCompact = computed
 	}
@@ -206,11 +213,7 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 	// 그렇다)이라 2배 이상 격차일 때만 경고해 상시 경고 피로를 피한다.
 	// 사용자가 ACW를 직접 설정한 경우는 판단을 존중해 경고하지 않는다.
 	if !userSet && haikuWindow > 0 {
-		eff := res.AutoCompact
-		if eff == 0 {
-			eff = minOf(mains)
-		}
-		if eff > 0 && haikuWindow*2 <= eff {
+		if eff := minOf(mains); eff > 0 && haikuWindow*2 <= eff {
 			res.HaikuBelow = haikuWindow
 		}
 	}
@@ -221,27 +224,48 @@ func Apply(p *config.Profile) (*config.Profile, *Resolution) {
 // Disable1MEnv는 Claude Code의 1M 컨텍스트 인식을 통째로 끄는 환경변수.
 const Disable1MEnv = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
 
-// Guard1M은 어떤 티어도 1M을 선언하지 않은 프로파일에 Disable1MEnv=1을 주입한 copy를
-// 반환한다. Apply 이후에 호출해야 한다(최종 모델 ID의 "[1m]" 유무로 판정).
+// PinModelEnv는 Claude Code가 시작 모델로 읽는 환경변수.
+const PinModelEnv = "ANTHROPIC_MODEL"
+
+// pinAlias는 고를 모델이 없을 때 고정하는 값 — Claude Code 기본값 "opus[1m]"에서 [1m]만 뺀 것.
+const pinAlias = "opus"
+
+// Guard는 Guard1M이 기본 모델 opus[1m]의 1M 과대 인식을 막으려고 한 일.
+type Guard struct {
+	Disable1M bool   // CLAUDE_CODE_DISABLE_1M_CONTEXT=1 주입
+	PinModel  string // ANTHROPIC_MODEL로 고정한 값 ("" = 고정 안 함)
+}
+
+// ModelChoice는 Claude Code가 시작 모델을 정하는 데 쓰는, ccx 프로파일 밖의 사용자 지정.
+type ModelChoice struct {
+	CLI      string // --model 인자
+	Settings string // settings.json(user < project < local)의 model
+}
+
+// Guard1M은 어떤 티어도 1M을 선언하지 않은 프로파일에서 Claude Code의 기본 모델
+// "opus[1m]"이 1M으로 잡히지 않게 막은 copy를 반환한다. Apply 이후에 호출해야 한다
+// (최종 모델 ID의 "[1m]" 유무로 판정).
 //
 // Claude Code 2.1.283의 기본 모델은 "opus[1m]"이라, 모델을 고르지 않으면
 // ANTHROPIC_DEFAULT_OPUS_MODEL 뒤에 "[1m]"을 스스로 붙여 1M으로 해석한다(실측:
-// /model → "<id>[1m] (default)"). 커스텀 ID라도 200K 가정이 적용되지 않아 statusline의
-// context_window_size가 1M이 되고, ACW가 없으면 자동 압축도 1M 기준이라 오버플로가 난다.
+// /model → "<id>[1m] (default)"). "[1m]"은 MAX_CONTEXT_TOKENS보다 우선하므로
+// statusline의 context_window_size가 1M이 되고 자동 압축도 1M 기준이 된다.
 //
-// 한 티어라도 "[1m]"을 달고 있으면 건드리지 않는다 — 끄면 "[1m]" 인식 자체가 사라져
-// Apply의 "[1m]"+ACW 짝이 깨진다. 그래서 일부 티어만 1M인 혼합 프로파일의 비-1M
-// 티어는 여전히 ACW에만 의존한다. 모델을 하나도 지정하지 않은 프로파일(순정 Claude
-// 모델 경로)과 사용자가 키를 직접 둔 경우(profile.env/ambient)도 제외한다.
-func Guard1M(p *config.Profile) (*config.Profile, bool) {
-	if p == nil || disabled() {
-		return p, false
-	}
-	if _, ok := p.Env[Disable1MEnv]; ok {
-		return p, false
-	}
-	if _, ok := os.LookupEnv(Disable1MEnv); ok {
-		return p, false
+// 막는 방법은 둘이다. 기본은 CLAUDE_CODE_DISABLE_1M_CONTEXT=1 — 어떤 경로로 [1m]이
+// 붙어도 무시된다. 그런데 Claude Code는 이 키를 "200K 상한을 지키겠다"는 뜻으로 읽어,
+// 모델 윈도우가 200K를 넘으면(MAX_CONTEXT_TOKENS로 262K를 선언한 경우 등) 시작할
+// 때마다 "the 200K limit isn't enforced" 경고를 띄운다(2.1.289 실측). 그래서 윈도우가
+// 200K를 넘을 때는 대신 시작 모델을 [1m] 없는 값으로 ANTHROPIC_MODEL에 고정한다.
+// 사용자가 이미 [1m] 없는 모델을 골랐다면 아무것도 하지 않고, [1m]이 든 모델을
+// 골랐다면 경고를 감수하고 1M을 끈다 — 실제 윈도우를 넘는 과대 인식보다 낫다.
+// 세션 중 /model로 1M 옵션을 고르는 것까지는 고정으로 막지 못한다.
+//
+// 한 티어라도 "[1m]"을 달고 있으면 건드리지 않는다 — 그 티어는 정말 1M이다. 모델을
+// 하나도 지정하지 않은 프로파일(순정 Claude 모델 경로)과 사용자가 키를 직접 둔
+// 경우(profile.env/ambient)도 제외한다.
+func Guard1M(p *config.Profile, choice ModelChoice) (*config.Profile, Guard) {
+	if p == nil || disabled() || userHas(p, Disable1MEnv) {
+		return p, Guard{}
 	}
 	var ids []string
 	if p.Models != nil {
@@ -255,20 +279,66 @@ func Guard1M(p *config.Profile) (*config.Profile, bool) {
 			continue
 		}
 		any = true
-		if strings.Contains(strings.ToLower(id), "[1m]") {
-			return p, false
+		if has1M(id) {
+			return p, Guard{}
 		}
 	}
 	if !any {
-		return p, false
+		return p, Guard{}
 	}
+
+	key, val := Disable1MEnv, "1"
+	if userInt(p, MaxTokensEnv) > defaultWindow {
+		pin, chosen := pinTarget(p, choice)
+		switch {
+		case chosen && !has1M(pin):
+			return p, Guard{} // 사용자가 [1m] 없는 모델을 이미 골랐다
+		case !chosen:
+			key, val = PinModelEnv, pin
+		}
+	}
+
 	out := *p
 	out.Env = make(map[string]string, len(p.Env)+1)
 	for k, v := range p.Env {
 		out.Env[k] = v
 	}
-	out.Env[Disable1MEnv] = "1"
-	return &out, true
+	out.Env[key] = val
+	if key == PinModelEnv {
+		return &out, Guard{PinModel: val}
+	}
+	return &out, Guard{Disable1M: true}
+}
+
+// pinTarget은 Claude Code가 시작 모델로 쓸 값을 우선순위(--model > ANTHROPIC_MODEL >
+// settings)대로 찾는다. chosen=true면 그 값이 이미 시작 모델로 확정돼 고정할 수 없다는
+// 뜻이고, false면 settings 값(없으면 pinAlias)을 ANTHROPIC_MODEL로 고정할 후보로 돌려준다.
+// settings 값도 같은 값으로 고정하는 이유: Claude Code가 settings의 "opus"를
+// "opus[1m]"으로 마이그레이션하는 경로가 있어, env로 붙잡아 두는 편이 안전하다.
+func pinTarget(p *config.Profile, choice ModelChoice) (string, bool) {
+	if m := strings.TrimSpace(choice.CLI); m != "" {
+		return m, true
+	}
+	if v, ok := p.Env[PinModelEnv]; ok {
+		return config.ResolveSecret(v), true
+	}
+	if m := config.ResolveSecret(p.Model); m != "" {
+		return m, true
+	}
+	if m, ok := os.LookupEnv(PinModelEnv); ok && strings.TrimSpace(m) != "" {
+		return m, true
+	}
+	if m := strings.TrimSpace(choice.Settings); m != "" {
+		if has1M(m) {
+			return m, true // [1m]을 직접 고른 설정은 바꾸지 않는다 — 1M 끄기로 폴백
+		}
+		return m, false
+	}
+	return pinAlias, false
+}
+
+func has1M(id string) bool {
+	return strings.Contains(strings.ToLower(id), "[1m]")
 }
 
 // stripOnly는 kill-switch 상태의 최소 동작 — [1m] 부착·ACW 주입·카탈로그를
@@ -305,12 +375,25 @@ func stripOnly(p *config.Profile) (*config.Profile, *Resolution) {
 	return &out, nil
 }
 
-// acwNeed는 윈도우 W를 전달하는 데 필요한 AUTO_COMPACT_WINDOW 값 (0 = 불필요).
-func acwNeed(w int) int {
-	if w == defaultWindow || w >= 1_000_000 {
-		return 0
+// userHas는 사용자가 key를 profile.env나 ambient env로 직접 지정했는지 본다.
+func userHas(p *config.Profile, key string) bool {
+	if _, ok := p.Env[key]; ok {
+		return true
 	}
-	return w
+	_, ok := os.LookupEnv(key)
+	return ok
+}
+
+// userInt는 userHas와 같은 우선순위(profile.env > ambient)로 정수값을 읽는다 (없거나 파싱 실패 = 0).
+func userInt(p *config.Profile, key string) int {
+	v, ok := p.Env[key]
+	if ok {
+		v = config.ResolveSecret(v)
+	} else {
+		v = os.Getenv(key)
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(v))
+	return n
 }
 
 // ParseSuffix는 "GLM-4.7[200k]" → ("GLM-4.7", 200000, true)로 해석한다.
