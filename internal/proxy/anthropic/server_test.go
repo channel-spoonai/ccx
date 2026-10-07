@@ -417,3 +417,76 @@ func TestProxyLeavesEffortAloneWhenDisabled(t *testing.T) {
 		t.Errorf("매핑을 껐는데 본문이 바뀌었다:\n%s", got.body)
 	}
 }
+
+func startUsageProxy(t *testing.T, upstream string, fix bool) *Server {
+	t.Helper()
+	s, err := Start(ServerOptions{UpstreamBaseURL: upstream, FixUsage: fix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Shutdown(t.Context()) })
+	return s
+}
+
+// mlx-serve 스트리밍 실측 형태 — input은 message_start, cache_read는 message_delta.
+const inclusiveSSE = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":6315,\"output_tokens\":1}}}\n\n" +
+	"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n" +
+	"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1,\"cache_read_input_tokens\":6284}}\n\n" +
+	"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+func TestProxyFixesInclusiveUsageInStream(t *testing.T) {
+	var got capture
+	up := newUpstream(t, &got, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(inclusiveSSE))
+	})
+	defer up.Close()
+	s := startUsageProxy(t, up.URL, true)
+
+	resp := post(t, s, "/v1/messages", `{"model":"m","messages":[]}`, nil)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"usage":{"cache_read_input_tokens":6284,"input_tokens":31,"output_tokens":1}`) {
+		t.Errorf("message_delta에 보정된 input_tokens가 없다: %q", body)
+	}
+	if !strings.Contains(string(body), `"text":"OK"`) || !strings.Contains(string(body), "message_stop") {
+		t.Errorf("나머지 이벤트가 그대로 전달되지 않았다: %q", body)
+	}
+}
+
+func TestProxyFixesInclusiveUsageInJSON(t *testing.T) {
+	var got capture
+	up := newUpstream(t, &got, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"type":"message","usage":{"input_tokens":2792,"output_tokens":3,"cache_read_input_tokens":2761}}`))
+	})
+	defer up.Close()
+	s := startUsageProxy(t, up.URL, true)
+
+	resp := post(t, s, "/v1/messages", `{"model":"m","messages":[]}`, nil)
+	defer resp.Body.Close()
+	var out struct{ Usage map[string]int }
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Usage["input_tokens"] != 31 || out.Usage["cache_read_input_tokens"] != 2761 {
+		t.Errorf("usage = %v", out.Usage)
+	}
+}
+
+func TestProxyLeavesUsageAloneByDefault(t *testing.T) {
+	var got capture
+	up := newUpstream(t, &got, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(inclusiveSSE))
+	})
+	defer up.Close()
+	s := startUsageProxy(t, up.URL, false)
+
+	resp := post(t, s, "/v1/messages", `{"model":"m","messages":[]}`, nil)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != inclusiveSSE {
+		t.Errorf("기본값에서는 바이트 그대로여야 한다: %q", body)
+	}
+}

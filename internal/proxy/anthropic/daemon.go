@@ -21,6 +21,7 @@ type DaemonOptions struct {
 	NormalizeSystem bool
 	SessionHeader   string
 	EffortMap       map[string]string
+	FixUsage        bool
 	IdleTimeout     time.Duration
 	ReadyWriter     interface {
 		Write([]byte) (int, error)
@@ -44,6 +45,7 @@ func RunDaemon(opts DaemonOptions) error {
 		NormalizeSystem: opts.NormalizeSystem,
 		SessionHeader:   opts.SessionHeader,
 		EffortMap:       opts.EffortMap,
+		FixUsage:        opts.FixUsage,
 		IdleTimeout:     opts.IdleTimeout,
 	})
 	if err != nil {

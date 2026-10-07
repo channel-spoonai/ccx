@@ -46,6 +46,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 		NormalizeSystem: normalize,
 		SessionHeader:   strings.TrimSpace(p.SessionHeader),
 		EffortMap:       anthropicEffortMapValue(p),
+		FixUsage:        anthropicFixUsageEnabled(p),
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn anthropic proxy: %w", err)
@@ -58,7 +59,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 	return &p2, nil
 }
 
-func printAnthropicBanner(addr, upstream string, normalize bool, effort map[string]string) {
+func printAnthropicBanner(addr, upstream string, normalize bool, effort map[string]string, fixUsage bool) {
 	note := ""
 	if normalize {
 		note = " (mid-conversation system → user)"
@@ -67,6 +68,19 @@ func printAnthropicBanner(addr, upstream string, normalize bool, effort map[stri
 	if len(effort) > 0 {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m Effort → thinking: %s\n", tr.FormatEffortMap(effort))
 	}
+	if fixUsage {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Usage: input_tokens에서 캐시분 차감 (업스트림이 캐시 포함으로 보고)\n")
+	}
+}
+
+// anthropicFixUsageEnabled는 업스트림이 usage.input_tokens에 캐시분을 포함해 보내는지(opt-in).
+// 기본 OFF — 규격대로 보내는 서버에 켜면 신규 입력이 과소 집계된다.
+func anthropicFixUsageEnabled(p *config.Profile) bool {
+	switch strings.ToLower(strings.TrimSpace(ResolveSecret(p.Env[proxy.CCXUsageIncludesCacheEnv]))) {
+	case "true", "1", "on", "yes":
+		return true
+	}
+	return false
 }
 
 // anthropicEffortMapValue는 데몬에 넘길 원문 env 값 (빈 문자열이면 데몬이 기본 표를 쓴다).

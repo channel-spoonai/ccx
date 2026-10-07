@@ -70,7 +70,7 @@ func Launch(p *config.Profile, args []string) error {
 		}
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
-		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap)
+		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap, anthropicFixUsageEnabled(p))
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}

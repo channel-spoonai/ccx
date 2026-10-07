@@ -175,6 +175,22 @@ Claude Code 쪽 등급은 Anthropic 모델 기준으로 매겨진 것이라 같�
 값이 `off`/`false`/`0`/`none`이면 기능 자체를 끄고, 개별 티어에 `keep`을 주면 그 티어만 손대지 않는다.
 매핑 실패는 정규화와 마찬가지로 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
 
+**usage 캐시 이중 집계 보정** (`FixInclusiveUsage`/`UsageStreamFixer`, opt-in): Anthropic 규격의
+`usage.input_tokens`는 캐시에 적중하지 않은 신규 입력만 센다(전체 = input + cache_read + cache_creation).
+mlx-serve는 input_tokens에 **전체 프롬프트**를 싣고 cache_read를 따로 또 실어, Claude Code의 컨텍스트·비용
+미터가 거의 2배가 된다(실측: 25,843토큰 프롬프트가 input 25,843 + cache_read 25,812로 집계).
+`profile.env`에 `CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE=true`를 주면 프록시가 응답에서
+`input_tokens -= cache_read + cache_creation`을 한다(보정 후 같은 턴: input 31 + cache_read 25,812).
+
+- **기본 OFF인 이유**: 규격대로 보내는 서버에 켜면 신규 입력이 0 근처로 과소 집계된다. 응답만 보고는
+  어느 쪽인지 판별할 수 없어(큰 신규 입력 + 작은 캐시 적중은 정상 응답과 구별 불가) 서버별 opt-in으로 둔다.
+- **스트리밍**: mlx-serve는 input을 `message_start`에, cache_read를 마지막 `message_delta`에 나눠 보낸다.
+  start의 원본 input을 기억했다가 delta에 보정된 `input_tokens`를 **주입**한다 — Claude Code는 delta의
+  usage 필드로 start 값을 덮어쓴다.
+- **최소 1**: Claude Code(2.1.292)는 delta의 `input_tokens`가 0이면 "값 없음"으로 보고 start 값(보정 전
+  전체 프롬프트)을 유지하므로, 스트리밍 보정값은 `max(1, …)`로 막는다. 비스트리밍은 `max(0, …)`.
+- 대상은 `/v1/messages` 200 응답뿐(count_tokens 제외). 보정 실패는 원본을 그대로 보낸다.
+
 ## 로컬 프로파일 기본값 (`internal/launcher/local.go`)
 
 `baseUrl` 호스트가 loopback·사설망·`.local`이면(`IsLocalProfile`, auth 경로 무관 — prepare가

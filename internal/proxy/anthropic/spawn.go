@@ -35,6 +35,10 @@ const (
 	// CCXEffortMapEnv는 Claude Code effort → 업스트림 동작 매핑
 	// ("low=off,medium=medium,high=xhigh,max=xhigh"). 비어 있으면 기본 표.
 	CCXEffortMapEnv = "CCX_ANTHROPIC_EFFORT_MAP"
+
+	// CCXUsageIncludesCacheEnv가 "true"면 응답 usage.input_tokens에서 캐시분을 뺀다.
+	// input_tokens에 캐시를 포함해 보내는 업스트림(mlx-serve)용 opt-in.
+	CCXUsageIncludesCacheEnv = "CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE"
 )
 
 type SpawnInput struct {
@@ -44,6 +48,7 @@ type SpawnInput struct {
 	NormalizeSystem bool
 	SessionHeader   string
 	EffortMap       string
+	FixUsage        bool
 }
 
 type SpawnedDaemon struct {
@@ -77,6 +82,7 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		CCXNormalizeSystemEnv+"="+strconv.FormatBool(in.NormalizeSystem),
 		CCXSessionHeaderEnv+"="+in.SessionHeader,
 		CCXEffortMapEnv+"="+in.EffortMap,
+		CCXUsageIncludesCacheEnv+"="+strconv.FormatBool(in.FixUsage),
 	)
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()

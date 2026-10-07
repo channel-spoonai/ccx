@@ -4,6 +4,8 @@
 package anthropic
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -35,6 +37,10 @@ type ServerOptions struct {
 
 	// EffortMap이 있으면 output_config.effort를 업스트림이 읽는 자리로 옮긴다 (nil = 끔).
 	EffortMap map[string]string
+
+	// FixUsage가 true면 응답 usage.input_tokens에서 캐시분을 뺀다 — input_tokens에 캐시를
+	// 포함해 보내는 업스트림(mlx-serve) 전용. 규격대로 보내는 서버에 켜면 과소 집계된다.
+	FixUsage bool
 }
 
 type Server struct {
@@ -47,6 +53,7 @@ type Server struct {
 	normalizeSystem bool
 	sessionHeader   string
 	effortMap       map[string]string
+	fixUsage        bool
 	inFlightMu      sync.Mutex
 	inFlight        map[string]bool
 	lastActive      atomic.Int64
@@ -73,6 +80,7 @@ func Start(opts ServerOptions) (*Server, error) {
 		normalizeSystem: opts.NormalizeSystem,
 		sessionHeader:   strings.TrimSpace(opts.SessionHeader),
 		effortMap:       opts.EffortMap,
+		fixUsage:        opts.FixUsage,
 		inFlight:        map[string]bool{},
 		stop:            make(chan struct{}),
 		idleTimeout:     opts.IdleTimeout,
@@ -243,6 +251,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+
+	if s.fixUsage && upstream.StatusCode == http.StatusOK && isMessagesPath(r.URL.Path) {
+		if strings.HasPrefix(upstream.Header.Get("Content-Type"), "text/event-stream") {
+			w.WriteHeader(upstream.StatusCode)
+			relaySSEFixingUsage(w, upstream.Body)
+			return
+		}
+		relayJSONFixingUsage(w, upstream)
+		return
+	}
 	w.WriteHeader(upstream.StatusCode)
 
 	// SSE가 버퍼링되면 Claude Code의 스트리밍 UI가 멈춘 것처럼 보인다 — 청크마다 flush.
@@ -259,6 +277,55 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if rerr != nil {
+			return
+		}
+	}
+}
+
+// isMessagesPath는 생성 응답(usage에 캐시 필드가 실리는 쪽)만 고른다 — count_tokens는 제외.
+func isMessagesPath(path string) bool {
+	return strings.TrimSuffix(path, "/") == "/v1/messages"
+}
+
+// relayJSONFixingUsage는 비스트리밍 응답을 통째로 읽어 usage를 고친 뒤 내보낸다.
+// 보정 실패는 치명적이지 않다 — 원본을 그대로 보내면 미터만 부풀 뿐이다.
+func relayJSONFixingUsage(w http.ResponseWriter, upstream *http.Response) {
+	body, err := io.ReadAll(upstream.Body)
+	if err == nil {
+		if patched, changed, ferr := tr.FixInclusiveUsage(body); ferr == nil && changed {
+			body = patched
+		}
+	}
+	w.WriteHeader(upstream.StatusCode)
+	_, _ = w.Write(body)
+}
+
+// relaySSEFixingUsage는 SSE를 줄 단위로 중계하며 message_start/message_delta의 usage를 고친다.
+// 이벤트 경계(빈 줄)마다 flush해 스트리밍 UI가 멈춰 보이지 않게 한다.
+func relaySSEFixingUsage(w http.ResponseWriter, body io.Reader) {
+	flusher, _ := w.(http.Flusher)
+	br := bufio.NewReaderSize(body, 32*1024)
+	var fixer tr.UsageStreamFixer
+	for {
+		line, rerr := br.ReadBytes('\n')
+		if len(line) > 0 {
+			if payload, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+				trimmed := bytes.TrimSpace(payload)
+				if patched, changed, ferr := fixer.Event(trimmed); ferr == nil && changed {
+					line = append(append([]byte("data: "), patched...), '\n')
+				}
+			}
+			if _, werr := w.Write(line); werr != nil {
+				return
+			}
+			if flusher != nil && len(bytes.TrimSpace(line)) == 0 {
+				flusher.Flush()
+			}
+		}
+		if rerr != nil {
+			if flusher != nil {
+				flusher.Flush()
+			}
 			return
 		}
 	}

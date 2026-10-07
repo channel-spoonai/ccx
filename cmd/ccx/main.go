@@ -324,6 +324,7 @@ func runAnthropicProxyDaemon() {
 		NormalizeSystem: normalize,
 		SessionHeader:   os.Getenv(anthropicproxy.CCXSessionHeaderEnv),
 		EffortMap:       effortMap,
+		FixUsage:        os.Getenv(anthropicproxy.CCXUsageIncludesCacheEnv) == "true",
 		IdleTimeout:     0,
 		ReadyWriter:     os.Stdout,
 	})
