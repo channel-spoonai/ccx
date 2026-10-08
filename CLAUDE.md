@@ -191,6 +191,20 @@ mlx-serve는 input_tokens에 **전체 프롬프트**를 싣고 cache_read를 따
   전체 프롬프트)을 유지하므로, 스트리밍 보정값은 `max(1, …)`로 막는다. 비스트리밍은 `max(0, …)`.
 - 대상은 `/v1/messages` 200 응답뿐(count_tokens 제외). 보정 실패는 원본을 그대로 보낸다.
 
+**count_tokens 폴백** (`countTokensLocally`, `CountTokensText`, 기본 ON): `/context`는 응답 usage가
+아니라 카테고리(시스템·툴·메모리·스킬·메시지)마다 `/v1/messages/count_tokens`를 불러 그린다(실측 16건).
+mlx-serve는 이 엔드포인트가 없어 404를 내고, 그러면 Claude Code는 글자 수 추정(텍스트 len/4, JSON len/2)으로
+떨어진다 — 툴 결과가 많은 대화에서 2배 가까이 부푼다(실측: 서버 74,343토큰인 세션이 `/context` 142.3k).
+업스트림 count_tokens가 404면 프록시가 요청의 system·tools·messages 텍스트를 평문으로 펼쳐 같은 서버의
+`/tokenize`(llama.cpp 계열 `{"content"}` → `{"tokens":[…]}`, vLLM식 `{"count"}`도 수용)로 세고, 메시지·툴마다
+템플릿 구분 토큰 근사치 5를 더해 `{"input_tokens":N}`으로 답한다. 수정 후 실측: 서버 52,236토큰 ↔ `/context` 52.2k.
+
+- JSON(툴 입력·스키마)은 **비ASCII를 이스케이프하지 않고** 다시 쓴다 — `\uXXXX`로 세면 한국어가 몇 배로 는다.
+- 404를 한 번 보면 이후로는 count_tokens 왕복을 건너뛰고(`countTokensMissing`), `/tokenize`가 404면
+  다시 시도하지 않고 원래 404를 중계한다(`tokenizeUnsupported`) — 지금보다 나빠지는 경우가 없다.
+- env 키를 두지 않는 이유: 기본 ON이라 키가 필요 없고, 키가 없으니 자동 업데이트 직후의 "구버전 부모 +
+  신버전 데몬" 조합에서도 바로 동작한다(반면 usage 보정은 profile.env를 부모가 넘겨야 해서 그 첫 실행엔 빠진다).
+
 ## 로컬 프로파일 기본값 (`internal/launcher/local.go`)
 
 `baseUrl` 호스트가 loopback·사설망·`.local`이면(`IsLocalProfile`, auth 경로 무관 — prepare가

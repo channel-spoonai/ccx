@@ -54,12 +54,16 @@ type Server struct {
 	sessionHeader   string
 	effortMap       map[string]string
 	fixUsage        bool
-	inFlightMu      sync.Mutex
-	inFlight        map[string]bool
-	lastActive      atomic.Int64
-	stop            chan struct{}
-	stopOnce        sync.Once
-	idleTimeout     time.Duration
+	// countTokensMissing은 업스트림 count_tokens가 404를 냈다는 기록 — 이후로는 왕복 없이 바로
+	// /tokenize로 센다. tokenizeUnsupported는 그 폴백마저 없는 서버라 시도하지 않는다는 기록.
+	countTokensMissing  atomic.Bool
+	tokenizeUnsupported atomic.Bool
+	inFlightMu          sync.Mutex
+	inFlight            map[string]bool
+	lastActive          atomic.Int64
+	stop                chan struct{}
+	stopOnce            sync.Once
+	idleTimeout         time.Duration
 }
 
 func Start(opts ServerOptions) (*Server, error) {
@@ -224,6 +228,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		defer s.releaseSession(stamped)
 	}
 
+	countTokens := r.Method == http.MethodPost && isCountTokensPath(r.URL.Path)
+	if countTokens && s.countTokensMissing.Load() && s.countTokensLocally(w, r, body) {
+		return
+	}
+
 	upstream, err := s.forward(r, body)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, "api_error", "upstream request failed: "+err.Error())
@@ -242,6 +251,13 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	defer upstream.Body.Close()
+
+	if countTokens && upstream.StatusCode == http.StatusNotFound {
+		s.countTokensMissing.Store(true)
+		if s.countTokensLocally(w, r, body) {
+			return
+		}
+	}
 
 	for k, vs := range upstream.Header {
 		if skipResponseHeader(k) {
