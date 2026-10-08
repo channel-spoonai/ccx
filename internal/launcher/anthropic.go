@@ -1,8 +1,11 @@
 package launcher
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,7 +28,7 @@ const AuthAnthropic = "anthropic"
 // prepareAnthropic은 패스스루 프록시를 띄우고 BaseURL/AuthToken을 주입한 profile copy를 준다.
 // 정규화는 기본 ON. profile.env에 CCX_ANTHROPIC_NORMALIZE_SYSTEM=false 로 끌 수 있다.
 // effort 매핑도 기본 ON — profile.env의 CCX_ANTHROPIC_EFFORT_MAP으로 표를 바꾸거나 끈다.
-func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
+func prepareAnthropic(p *config.Profile, fixUsage bool) (*config.Profile, error) {
 	upstream := ResolveSecret(p.BaseURL)
 	if upstream == "" {
 		return nil, errors.New("profile.baseUrl is empty — set it to the upstream Anthropic-compatible server (e.g. http://localhost:8000)")
@@ -46,7 +49,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 		NormalizeSystem: normalize,
 		SessionHeader:   strings.TrimSpace(p.SessionHeader),
 		EffortMap:       anthropicEffortMapValue(p),
-		FixUsage:        anthropicFixUsageEnabled(p),
+		FixUsage:        fixUsage,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn anthropic proxy: %w", err)
@@ -59,7 +62,7 @@ func prepareAnthropic(p *config.Profile) (*config.Profile, error) {
 	return &p2, nil
 }
 
-func printAnthropicBanner(addr, upstream string, normalize bool, effort map[string]string, fixUsage bool) {
+func printAnthropicBanner(addr, upstream string, normalize bool, effort map[string]string, fixUsage fixUsageDecision) {
 	note := ""
 	if normalize {
 		note = " (mid-conversation system → user)"
@@ -68,19 +71,75 @@ func printAnthropicBanner(addr, upstream string, normalize bool, effort map[stri
 	if len(effort) > 0 {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m Effort → thinking: %s\n", tr.FormatEffortMap(effort))
 	}
-	if fixUsage {
-		fmt.Printf("\x1B[36m[ccx]\x1B[0m Usage: input_tokens에서 캐시분 차감 (업스트림이 캐시 포함으로 보고)\n")
+	if fixUsage.Enabled {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Usage: input_tokens에서 캐시분 차감 (%s)\n", fixUsage.Reason)
 	}
 }
 
-// anthropicFixUsageEnabled는 업스트림이 usage.input_tokens에 캐시분을 포함해 보내는지(opt-in).
-// 기본 OFF — 규격대로 보내는 서버에 켜면 신규 입력이 과소 집계된다.
-func anthropicFixUsageEnabled(p *config.Profile) bool {
-	switch strings.ToLower(strings.TrimSpace(ResolveSecret(p.Env[proxy.CCXUsageIncludesCacheEnv]))) {
-	case "true", "1", "on", "yes":
-		return true
+// fixUsageDecision은 usage 보정을 켤지와 그 근거(배너 표시용).
+type fixUsageDecision struct {
+	Enabled bool
+	Reason  string
+}
+
+// anthropicFixUsage는 업스트림이 usage.input_tokens에 캐시분을 포함해 보내는지 판정한다.
+//
+// profile.env의 CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE가 있으면 그 값이 이긴다. 없으면
+// 업스트림 /v1/models의 owned_by가 "mlx-serve"인지 보고 자동으로 켠다 — 키를 기기마다 손으로
+// 넣게 두었더니 LAN의 다른 기기 프로파일에서 빠져 /context가 다시 2배로 나왔다(2026-10 실측).
+// 그 밖의 서버는 응답만으로 캐시 포함 여부를 판별할 수 없어(규격대로인 서버에 켜면 신규 입력이
+// 0 근처로 과소 집계된다) 끈 채로 둔다. 감지 실패(서버 꺼짐·타임아웃)도 끈 쪽으로 떨어진다.
+func anthropicFixUsage(p *config.Profile) fixUsageDecision {
+	if v, ok := p.Env[proxy.CCXUsageIncludesCacheEnv]; ok {
+		switch strings.ToLower(strings.TrimSpace(ResolveSecret(v))) {
+		case "true", "1", "on", "yes":
+			return fixUsageDecision{true, "profile.env"}
+		}
+		return fixUsageDecision{}
 	}
-	return false
+	if upstreamOwnedBy(ResolveSecret(p.BaseURL), ResolveSecret(p.AuthToken), ResolveSecret(p.APIKey)) == mlxServeOwner {
+		return fixUsageDecision{true, "mlx-serve 자동 감지"}
+	}
+	return fixUsageDecision{}
+}
+
+// mlxServeOwner는 mlx-serve가 /v1/models의 owned_by에 싣는 값.
+const mlxServeOwner = "mlx-serve"
+
+// upstreamOwnedBy는 업스트림 /v1/models 첫 모델의 owned_by를 돌려준다 (실패 시 "").
+// 런치를 붙잡지 않도록 짧게 끊는다 — 로컬·LAN 서버라 정상이면 수 ms다.
+func upstreamOwnedBy(baseURL, authToken, apiKey string) string {
+	base := strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1")
+	if base == "" {
+		return ""
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/v1/models", nil)
+	if err != nil {
+		return ""
+	}
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	}
+	if apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var out struct {
+		Data []struct {
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out) != nil || len(out.Data) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(out.Data[0].OwnedBy)
 }
 
 // anthropicEffortMapValue는 데몬에 넘길 원문 env 값 (빈 문자열이면 데몬이 기본 표를 쓴다).

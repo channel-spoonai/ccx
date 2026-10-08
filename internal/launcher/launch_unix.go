@@ -64,13 +64,14 @@ func Launch(p *config.Profile, args []string) error {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		normalize := anthropicNormalizeEnabled(p)
 		effortMap := anthropicEffortMap(p)
-		prepared, err := prepareAnthropic(p)
+		fixUsage := anthropicFixUsage(p)
+		prepared, err := prepareAnthropic(p, fixUsage.Enabled)
 		if err != nil {
 			return err
 		}
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
-		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap, anthropicFixUsageEnabled(p))
+		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap, fixUsage)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}

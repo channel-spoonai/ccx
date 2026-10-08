@@ -175,15 +175,19 @@ Claude Code 쪽 등급은 Anthropic 모델 기준으로 매겨진 것이라 같�
 값이 `off`/`false`/`0`/`none`이면 기능 자체를 끄고, 개별 티어에 `keep`을 주면 그 티어만 손대지 않는다.
 매핑 실패는 정규화와 마찬가지로 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
 
-**usage 캐시 이중 집계 보정** (`FixInclusiveUsage`/`UsageStreamFixer`, opt-in): Anthropic 규격의
+**usage 캐시 이중 집계 보정** (`FixInclusiveUsage`/`UsageStreamFixer`, mlx-serve 자동 감지): Anthropic 규격의
 `usage.input_tokens`는 캐시에 적중하지 않은 신규 입력만 센다(전체 = input + cache_read + cache_creation).
 mlx-serve는 input_tokens에 **전체 프롬프트**를 싣고 cache_read를 따로 또 실어, Claude Code의 컨텍스트·비용
 미터가 거의 2배가 된다(실측: 25,843토큰 프롬프트가 input 25,843 + cache_read 25,812로 집계).
-`profile.env`에 `CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE=true`를 주면 프록시가 응답에서
-`input_tokens -= cache_read + cache_creation`을 한다(보정 후 같은 턴: input 31 + cache_read 25,812).
+켜지면 프록시가 응답에서 `input_tokens -= cache_read + cache_creation`을 한다(보정 후 같은 턴:
+input 31 + cache_read 25,812). 켜는 판정은 `anthropicFixUsage`(launcher, 런치 시 1회): `profile.env`의
+`CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE`가 있으면 그 값(true/false)이 이기고, 없으면 업스트림
+`/v1/models`의 `owned_by`가 `"mlx-serve"`일 때 자동으로 켠다(2초 타임아웃, 실패하면 끔). 처음엔 opt-in이었는데
+LAN의 다른 기기 프로파일에 키가 빠져 `/context`가 다시 2배(서버 27,362 → 54.3k)로 나와 자동 감지로 바꿨다.
 
-- **기본 OFF인 이유**: 규격대로 보내는 서버에 켜면 신규 입력이 0 근처로 과소 집계된다. 응답만 보고는
-  어느 쪽인지 판별할 수 없어(큰 신규 입력 + 작은 캐시 적중은 정상 응답과 구별 불가) 서버별 opt-in으로 둔다.
+- **mlx-serve 외에는 끄는 이유**: 규격대로 보내는 서버에 켜면 신규 입력이 0 근처로 과소 집계된다. 응답만 보고는
+  어느 쪽인지 판별할 수 없어(큰 신규 입력 + 작은 캐시 적중은 정상 응답과 구별 불가) 서버 정체로만 판정한다.
+- `/context` 상단 합계는 마지막 응답 usage에서 오고 Messages는 그 나머지라, 보정이 빠지면 `/context`도 2배가 된다.
 - **스트리밍**: mlx-serve는 input을 `message_start`에, cache_read를 마지막 `message_delta`에 나눠 보낸다.
   start의 원본 input을 기억했다가 delta에 보정된 `input_tokens`를 **주입**한다 — Claude Code는 delta의
   usage 필드로 start 값을 덮어쓴다.
@@ -203,7 +207,7 @@ mlx-serve는 이 엔드포인트가 없어 404를 내고, 그러면 Claude Code�
 - 404를 한 번 보면 이후로는 count_tokens 왕복을 건너뛰고(`countTokensMissing`), `/tokenize`가 404면
   다시 시도하지 않고 원래 404를 중계한다(`tokenizeUnsupported`) — 지금보다 나빠지는 경우가 없다.
 - env 키를 두지 않는 이유: 기본 ON이라 키가 필요 없고, 키가 없으니 자동 업데이트 직후의 "구버전 부모 +
-  신버전 데몬" 조합에서도 바로 동작한다(반면 usage 보정은 profile.env를 부모가 넘겨야 해서 그 첫 실행엔 빠진다).
+  신버전 데몬" 조합에서도 바로 동작한다(반면 usage 보정은 부모가 판정해 넘기므로 v0.5.9 이전 부모가 띄운 첫 실행엔 빠진다).
 
 ## 로컬 프로파일 기본값 (`internal/launcher/local.go`)
 
