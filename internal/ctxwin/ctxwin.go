@@ -337,6 +337,71 @@ func pinTarget(p *config.Profile, choice ModelChoice) (string, bool) {
 	return pinAlias, false
 }
 
+// SettingsPin은 GuardSettingsModel이 settings.json의 Claude 모델 ID를 별칭으로 바꾼 내역.
+type SettingsPin struct {
+	From string // settings.json의 model (예: "claude-opus-4-8")
+	To   string // ANTHROPIC_MODEL로 고정한 별칭 ("" = 고정 안 함)
+}
+
+// GuardSettingsModel은 settings.json의 model이 정식 Claude 모델 ID일 때 같은 계열 별칭을
+// ANTHROPIC_MODEL로 고정한 copy를 반환한다. Guard1M보다 먼저 호출한다 — 고정값을 Guard1M이
+// "사용자가 고른 시작 모델"로 읽어야 한다.
+//
+// Claude Code는 settings의 별칭(opus/sonnet/haiku)만 ANTHROPIC_DEFAULT_*_MODEL로 해석하고,
+// "claude-opus-4-8" 같은 정식 ID는 그대로 업스트림에 보낸다. 커스텀 모델 프로파일의 서버는
+// 그 ID를 모르므로 "model may not exist"로 막힌다(2026-10 vast.ai 실측, --model opus면 통과).
+// 사용자가 시작 모델을 따로 골랐거나(--model / ANTHROPIC_MODEL / profile.model), 그 ID를
+// 프로파일 티어로 직접 쓰는 경우는 건드리지 않는다.
+func GuardSettingsModel(p *config.Profile, choice ModelChoice) (*config.Profile, SettingsPin) {
+	if p == nil || p.Models == nil {
+		return p, SettingsPin{}
+	}
+	settings := strings.TrimSpace(choice.Settings)
+	base := strings.ToLower(settingsBase(settings))
+	if !strings.HasPrefix(base, "claude-") {
+		return p, SettingsPin{}
+	}
+	if strings.TrimSpace(choice.CLI) != "" || userHas(p, PinModelEnv) || config.ResolveSecret(p.Model) != "" {
+		return p, SettingsPin{}
+	}
+	any := false
+	for _, raw := range []string{p.Models.Opus, p.Models.Sonnet, p.Models.Haiku} {
+		id := config.ResolveSecret(raw)
+		if id == "" {
+			continue
+		}
+		any = true
+		if strings.ToLower(settingsBase(id)) == base {
+			return p, SettingsPin{} // 프로파일이 그 ID를 직접 서빙한다
+		}
+	}
+	if !any {
+		return p, SettingsPin{} // 순정 Claude 모델 경로
+	}
+
+	alias := pinAlias
+	for _, family := range []string{"sonnet", "haiku"} {
+		if strings.Contains(base, family) {
+			alias = family
+		}
+	}
+	out := *p
+	out.Env = make(map[string]string, len(p.Env)+1)
+	for k, v := range p.Env {
+		out.Env[k] = v
+	}
+	out.Env[PinModelEnv] = alias
+	return &out, SettingsPin{From: settings, To: alias}
+}
+
+// settingsBase는 "[1m]"·"[262k]" 같은 대괄호 표기를 뗀 모델 ID.
+func settingsBase(id string) string {
+	if i := strings.LastIndex(id, "["); i > 0 && strings.HasSuffix(id, "]") {
+		return id[:i]
+	}
+	return id
+}
+
 func has1M(id string) bool {
 	return strings.Contains(strings.ToLower(id), "[1m]")
 }

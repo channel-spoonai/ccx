@@ -50,6 +50,10 @@ func TestApplyEffortMapsOneTierDown(t *testing.T) {
 		if string(got["reasoning_effort"]) != `"`+want+`"` {
 			t.Fatalf("%s의 reasoning_effort가 %s여야 하는데 %s", effort, want, got["reasoning_effort"])
 		}
+		// output_config.effort를 읽는 서버(vast.ai shim)가 원본 티어를 받고 400을 내지 않게 같이 바꾼다.
+		if string(got["output_config"]) != `{"effort":"`+want+`"}` {
+			t.Fatalf("%s의 output_config.effort가 %s여야 하는데 %s", effort, want, got["output_config"])
+		}
 		// thinking은 손대지 않는다 — 업스트림이 adaptive를 모르므로 서버 기본(켬)이 된다.
 		if string(got["thinking"]) != `{"type":"adaptive"}` {
 			t.Fatalf("%s에서 thinking 원본이 보존돼야 하는데 %s", effort, got["thinking"])
@@ -59,7 +63,7 @@ func TestApplyEffortMapsOneTierDown(t *testing.T) {
 
 // 프록시는 번역기가 아니라 패스스루다 — 손대지 않은 최상위 필드는 바이트 그대로 남아야 한다.
 func TestApplyEffortPreservesOtherFields(t *testing.T) {
-	body := []byte(`{"output_config":{"effort":"low"},"system":[{"type":"text","text":"s"}],"tools":[{"name":"t"}],"metadata":{"user_id":"u"}}`)
+	body := []byte(`{"output_config":{"effort":"high","format":{"type":"json"}},"system":[{"type":"text","text":"s"}],"tools":[{"name":"t"}],"metadata":{"user_id":"u"}}`)
 	out, _, err := ApplyEffort(body, DefaultEffortMap())
 	if err != nil {
 		t.Fatalf("ApplyEffort 실패: %v", err)
@@ -70,7 +74,7 @@ func TestApplyEffortPreservesOtherFields(t *testing.T) {
 		"system":        `[{"type":"text","text":"s"}]`,
 		"tools":         `[{"name":"t"}]`,
 		"metadata":      `{"user_id":"u"}`,
-		"output_config": `{"effort":"low"}`,
+		"output_config": `{"effort":"medium","format":{"type":"json"}}`,
 	} {
 		if string(got[k]) != want {
 			t.Fatalf("%s가 보존돼야 하는데 %s", k, got[k])
@@ -122,6 +126,24 @@ func TestApplyEffortOffDropsStaleReasoningEffort(t *testing.T) {
 	_ = json.Unmarshal(out, &got)
 	if _, ok := got["reasoning_effort"]; ok {
 		t.Fatalf("reasoning_effort가 지워져야 하는데 %s", out)
+	}
+}
+
+// thinking을 끄는 티어는 output_config.effort를 지운다 — 다른 키는 남기고, 비면 output_config째 뺀다.
+func TestApplyEffortOffRemovesOutputConfigEffort(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"output_config":{"effort":"low"}}`:                          "",
+		`{"output_config":{"effort":"low","format":{"type":"json"}}}`: `{"format":{"type":"json"}}`,
+	} {
+		out, _, err := ApplyEffort([]byte(body), DefaultEffortMap())
+		if err != nil {
+			t.Fatalf("ApplyEffort(%s) 실패: %v", body, err)
+		}
+		var got map[string]json.RawMessage
+		_ = json.Unmarshal(out, &got)
+		if string(got["output_config"]) != want {
+			t.Fatalf("%s의 output_config가 %q여야 하는데 %s", body, want, got["output_config"])
+		}
 	}
 }
 

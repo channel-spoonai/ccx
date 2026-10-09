@@ -29,8 +29,12 @@ func Launch(p *config.Profile, args []string) error {
 	// 127.0.0.1 프록시로 바꾸기 전에 원래 호스트로 판정해야 한다.
 	p, args, localAdj := applyLocalDefaults(p, args)
 
+	// settings.json의 정식 Claude 모델 ID는 커스텀 업스트림에 없다 — 같은 계열 별칭으로 고정한다.
+	choice := modelChoice(args)
+	p, localAdj.SettingsPin = ctxwin.GuardSettingsModel(p, choice)
+
 	// 어떤 티어도 1M을 선언하지 않으면 Claude Code 기본 모델 opus[1m]의 1M 과대 인식을 막는다.
-	p, localAdj.Guard1M = ctxwin.Guard1M(p, modelChoice(args))
+	p, localAdj.Guard1M = ctxwin.Guard1M(p, choice)
 
 	if p.Auth == AuthCodexOAuth {
 		prepared, err := prepareCodexOAuth(p)
@@ -40,6 +44,7 @@ func Launch(p *config.Profile, args []string) error {
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
 		printCodexOAuthBanner(prepared.BaseURL, "")
+		warnUpstreamTLSIgnored(p)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
@@ -56,6 +61,7 @@ func Launch(p *config.Profile, args []string) error {
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
 		printOpenAIResponsesBanner(prepared.BaseURL, endpoint)
+		warnUpstreamTLSIgnored(p)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
@@ -64,27 +70,37 @@ func Launch(p *config.Profile, args []string) error {
 		upstreamURL := ResolveSecret(p.BaseURL)
 		normalize := anthropicNormalizeEnabled(p)
 		effortMap := anthropicEffortMap(p)
-		fixUsage := anthropicFixUsage(p)
-		prepared, err := prepareAnthropic(p, fixUsage.Enabled)
+		tlsOpt, err := resolveUpstreamTLS(p)
+		if err != nil {
+			return err
+		}
+		fixUsage := anthropicFixUsage(p, tlsOpt)
+		prepared, err := prepareAnthropic(p, fixUsage.Enabled, tlsOpt)
 		if err != nil {
 			return err
 		}
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
 		printAnthropicBanner(prepared.BaseURL, upstreamURL, normalize, effortMap, fixUsage)
+		printUpstreamTLS(tlsOpt)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
 
 	if p.Auth == AuthOpenAIChat {
 		upstreamURL := ResolveSecret(p.BaseURL)
-		prepared, err := prepareOpenAIChat(p)
+		tlsOpt, err := resolveUpstreamTLS(p)
+		if err != nil {
+			return err
+		}
+		prepared, err := prepareOpenAIChat(p, tlsOpt)
 		if err != nil {
 			return err
 		}
 		printBanner(prepared, ctxRes)
 		printLocalAdjustments(localAdj)
 		printOpenAIChatBanner(prepared.BaseURL, upstreamURL)
+		printUpstreamTLS(tlsOpt)
 		argv := append([]string{binary}, args...)
 		return syscall.Exec(binary, argv, BuildEnv(prepared))
 	}
@@ -92,6 +108,7 @@ func Launch(p *config.Profile, args []string) error {
 	env := BuildEnv(p)
 	printBanner(p, ctxRes)
 	printLocalAdjustments(localAdj)
+	warnUpstreamTLSIgnored(p)
 	argv := append([]string{binary}, args...)
 	return syscall.Exec(binary, argv, env)
 }

@@ -24,7 +24,7 @@ const AuthOpenAIChat = "openai-chat"
 // 없고, 일부 reasoning 모델(lightning-mlx Qwen3 등)은 streaming 시 token budget을 reasoning에
 // 모두 소진해 실제 content가 거의 안 나오는 사양 차이가 있다. 사용자가 reasoning을 명시적으로
 // 켜려면 profile.env에 `CCX_OPENAICHAT_ENABLE_THINKING=true` 를 추가하면 된다.
-func prepareOpenAIChat(p *config.Profile) (*config.Profile, error) {
+func prepareOpenAIChat(p *config.Profile, tlsOpt upstreamTLS) (*config.Profile, error) {
 	upstream := ResolveSecret(p.BaseURL)
 	if upstream == "" {
 		return nil, errors.New("profile.baseUrl is empty — set it to the upstream OpenAI-compatible server (e.g. http://127.0.0.1:8010)")
@@ -46,6 +46,8 @@ func prepareOpenAIChat(p *config.Profile) (*config.Profile, error) {
 		UpstreamAuth:    upstreamAuth,
 		UpstreamAPIKey:  upstreamAPIKey,
 		EnableThinking:  &enableThinking,
+		UpstreamCAFile:  tlsOpt.CAFile,
+		UpstreamInsec:   tlsOpt.Insecure,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn openai-chat proxy: %w", err)

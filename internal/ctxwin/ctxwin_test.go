@@ -484,3 +484,70 @@ func TestGuard1MKillSwitch(t *testing.T) {
 		t.Fatal("CCX_CONTEXT_AUTO=0이면 주입하면 안 됨")
 	}
 }
+
+func TestGuardSettingsModel(t *testing.T) {
+	guardHermetic(t)
+
+	qwen := &config.Profile{Models: &config.Models{Opus: "qwen3.8-flash-next[128k]", Sonnet: "qwen3.8-flash-next[128k]", Haiku: "qwen3.8-flash-next[128k]"}}
+	cases := []struct {
+		name   string
+		p      *config.Profile
+		choice ModelChoice
+		want   SettingsPin
+	}{
+		{"정식 opus ID → opus", qwen, ModelChoice{Settings: "claude-opus-4-8"}, SettingsPin{From: "claude-opus-4-8", To: "opus"}},
+		{"[1m] 붙은 ID도 대상", qwen, ModelChoice{Settings: "claude-opus-4-8[1m]"}, SettingsPin{From: "claude-opus-4-8[1m]", To: "opus"}},
+		{"sonnet 계열은 sonnet", qwen, ModelChoice{Settings: "claude-sonnet-5"}, SettingsPin{From: "claude-sonnet-5", To: "sonnet"}},
+		{"haiku 계열은 haiku", qwen, ModelChoice{Settings: "claude-haiku-5-5"}, SettingsPin{From: "claude-haiku-5-5", To: "haiku"}},
+		{"계열 미상은 opus", qwen, ModelChoice{Settings: "claude-fable-5-1"}, SettingsPin{From: "claude-fable-5-1", To: "opus"}},
+		{"별칭은 그대로", qwen, ModelChoice{Settings: "opus"}, SettingsPin{}},
+		{"settings 없음", qwen, ModelChoice{}, SettingsPin{}},
+		{"CLI --model 우선", qwen, ModelChoice{CLI: "sonnet", Settings: "claude-opus-4-8"}, SettingsPin{}},
+		{"프로파일이 그 ID를 서빙", &config.Profile{Models: &config.Models{Opus: "claude-opus-4-8"}}, ModelChoice{Settings: "claude-opus-4-8"}, SettingsPin{}},
+		{"모델 미설정 (순정 Claude)", &config.Profile{}, ModelChoice{Settings: "claude-opus-4-8"}, SettingsPin{}},
+		{"profile.model로 이미 고름", &config.Profile{Model: "local", Models: &config.Models{Opus: "local"}}, ModelChoice{Settings: "claude-opus-4-8"}, SettingsPin{}},
+		{"profile.env ANTHROPIC_MODEL로 이미 고름", &config.Profile{Models: &config.Models{Opus: "local"}, Env: map[string]string{PinModelEnv: "opus"}}, ModelChoice{Settings: "claude-opus-4-8"}, SettingsPin{}},
+	}
+	for _, c := range cases {
+		out, got := GuardSettingsModel(c.p, c.choice)
+		if got != c.want {
+			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
+			continue
+		}
+		if got.To != "" && out.Env[PinModelEnv] != got.To {
+			t.Errorf("%s: ANTHROPIC_MODEL=%q, want %q", c.name, out.Env[PinModelEnv], got.To)
+		}
+		if got.To != "" && c.p.Env[PinModelEnv] != "" {
+			t.Errorf("%s: 입력 프로파일이 바뀌면 안 됨", c.name)
+		}
+	}
+}
+
+func TestGuardSettingsModelAmbient(t *testing.T) {
+	guardHermetic(t)
+	t.Setenv(PinModelEnv, "sonnet")
+	p := &config.Profile{Models: &config.Models{Opus: "local"}}
+	if _, got := GuardSettingsModel(p, ModelChoice{Settings: "claude-opus-4-8"}); got != (SettingsPin{}) {
+		t.Fatalf("셸의 ANTHROPIC_MODEL을 덮으면 안 됨: %+v", got)
+	}
+}
+
+// 고정값은 Guard1M이 "이미 고른 시작 모델"로 읽는다 — 200K 초과 윈도우에서 settings 원본을
+// 다시 ANTHROPIC_MODEL에 고정해 되돌리면 안 된다.
+func TestGuardSettingsModelThenGuard1M(t *testing.T) {
+	guardHermetic(t)
+	choice := ModelChoice{Settings: "claude-opus-4-8"}
+	p := &config.Profile{Models: &config.Models{Opus: "local"}, Env: map[string]string{MaxTokensEnv: "262144"}}
+	p, pin := GuardSettingsModel(p, choice)
+	p, g := Guard1M(p, choice)
+	if pin.To != "opus" || g != (Guard{}) || p.Env[PinModelEnv] != "opus" {
+		t.Fatalf("pin=%+v guard=%+v ANTHROPIC_MODEL=%q", pin, g, p.Env[PinModelEnv])
+	}
+
+	// 200K 이하면 1M 끄기는 그대로 걸린다
+	q := &config.Profile{Models: &config.Models{Opus: "local[128k]"}}
+	q, _ = GuardSettingsModel(q, choice)
+	if _, g := Guard1M(q, choice); !g.Disable1M {
+		t.Fatalf("128k 프로파일은 1M 끄기가 유지돼야 함: %+v", g)
+	}
+}

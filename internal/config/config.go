@@ -53,6 +53,13 @@ type Profile struct {
 	// 분류기 요청이 로컬 서버에서 타임아웃되기 때문. CLI로 직접 넘긴 값이 항상 우선.
 	PermissionMode string `json:"permissionMode,omitempty"`
 
+	// CACertFile은 업스트림 TLS에서 신뢰할 PEM 파일(절대경로 또는 ~/). 자가서명 HTTPS
+	// 백엔드(vast.ai 등)용으로, 그 파일의 인증서만 신뢰한다 — CA 없이 leaf만 넣어도 된다.
+	// InsecureTLS는 인증서 검증 자체를 끈다(둘은 함께 쓸 수 없다). 둘 다 프록시 경로
+	// (auth: "anthropic" / "openai-chat")에서만 적용된다 — 직결은 Claude Code가 연결한다.
+	CACertFile  string `json:"caCertFile,omitempty"`
+	InsecureTLS bool   `json:"insecureTLS,omitempty"`
+
 	// Auth 는 인증 방식 디스크리미네이터. 빈 문자열이면 기존 정적 토큰 흐름.
 	// "codex-oauth" 면 launcher가 ChatGPT(OpenAI Codex) OAuth 흐름으로 분기 —
 	// baseUrl/authToken/apiKey 필드는 무시되고 ccx가 로컬 프록시를 띄워 자동 주입한다.

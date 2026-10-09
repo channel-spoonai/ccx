@@ -33,7 +33,8 @@ type localAdjustments struct {
 	PermissionFrom string // 비어 있으면 권한 모드를 건드리지 않음
 	PermissionTo   string
 	AwaySummaryOff bool
-	Guard1M        ctxwin.Guard // 기본 opus[1m] 차단 내역 (로컬 여부 무관)
+	Guard1M        ctxwin.Guard       // 기본 opus[1m] 차단 내역 (로컬 여부 무관)
+	SettingsPin    ctxwin.SettingsPin // settings.json의 Claude 모델 ID → 별칭 고정 내역
 }
 
 // applyLocalDefaults는 로컬 프로파일이면 auto 모드와 away summary를 끈다.
@@ -184,6 +185,9 @@ func printLocalAdjustments(adj localAdjustments) {
 	}
 	if adj.AwaySummaryOff {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m Away summary (recap): off (local model — keeps the session cache aligned)\n")
+	}
+	if pin := adj.SettingsPin; pin.To != "" {
+		fmt.Printf("\x1B[36m[ccx]\x1B[0m Startup model: %s → %s (settings.json model is not served by this profile)\n", pin.From, pin.To)
 	}
 	if adj.Guard1M.Disable1M {
 		fmt.Printf("\x1B[36m[ccx]\x1B[0m 1M context: off (no model declares ≥1M — overrides Claude Code's default opus[1m])\n")

@@ -109,10 +109,15 @@ type EffortResult struct {
 //   - 매핑이 EffortOff면 `thinking`을 {"type":"disabled"}로 바꾸고 reasoning_effort는 싣지 않는다.
 //     Claude Code는 thinking을 끄더라도 `thinking` 필드를 **빼기만** 하는데, 업스트림은 필드
 //     부재를 "클라이언트 의견 없음"으로 읽고 서버 기본값(켬)으로 폴백한다. 그래서 끄려면
-//     비우는 게 아니라 disabled를 명시해야 한다.
+//     비우는 게 아니라 disabled를 명시해야 한다. `output_config.effort`는 지운다.
 //   - 그 밖의 값이면 최상위 `reasoning_effort`에 그 값을 싣는다. `thinking`은 원본 그대로 둔다 —
 //     Claude Code가 보내는 {"type":"adaptive"}는 업스트림이 인식하지 못해 서버 기본(켬)이 되고,
 //     effort만 클라이언트 값으로 적용된다.
+//
+// `output_config.effort`도 매핑값으로 바꾼다. MTPLX는 이 자리를 읽지 않아 원본을 둬도 됐지만,
+// Anthropic 규격대로 이 자리를 읽고 자기 티어 밖의 값을 거부하는 서버가 있다(vast.ai shim:
+// `Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.`,
+// 2026-10 실측). 원본 "high"를 남기면 reasoning_effort를 옮겨 실어도 400이 난다.
 //
 // output_config가 없거나 매핑에 없는 effort면 원본 바이트를 그대로 돌려준다. 최상위 키는
 // 손대는 것만 교체하고 나머지는 원본 RawMessage를 보존한다 — 프록시는 번역기가 아니라
@@ -130,13 +135,17 @@ func ApplyEffort(body []byte, m map[string]string) ([]byte, EffortResult, error)
 	if !ok {
 		return body, res, nil
 	}
-	var oc struct {
-		Effort string `json:"effort"`
-	}
+	var oc map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &oc); err != nil {
 		return nil, res, err
 	}
-	res.Requested = strings.TrimSpace(oc.Effort)
+	var requested string
+	if v, ok := oc["effort"]; ok {
+		if err := json.Unmarshal(v, &requested); err != nil {
+			return nil, res, err
+		}
+	}
+	res.Requested = strings.TrimSpace(requested)
 	if res.Requested == "" {
 		return body, res, nil
 	}
@@ -149,6 +158,7 @@ func ApplyEffort(body []byte, m map[string]string) ([]byte, EffortResult, error)
 	if action == EffortOff {
 		envelope["thinking"] = json.RawMessage(`{"type":"disabled"}`)
 		delete(envelope, "reasoning_effort")
+		delete(oc, "effort")
 		res.ThinkingDisabled = true
 	} else {
 		effort, err := json.Marshal(action)
@@ -156,7 +166,17 @@ func ApplyEffort(body []byte, m map[string]string) ([]byte, EffortResult, error)
 			return nil, res, err
 		}
 		envelope["reasoning_effort"] = effort
+		oc["effort"] = effort
 		res.ReasoningEffort = action
+	}
+	if len(oc) == 0 {
+		delete(envelope, "output_config")
+	} else {
+		ocRaw, err := json.Marshal(oc)
+		if err != nil {
+			return nil, res, err
+		}
+		envelope["output_config"] = ocRaw
 	}
 
 	out, err := json.Marshal(envelope)

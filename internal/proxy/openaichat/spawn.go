@@ -24,6 +24,8 @@ const (
 	CCXUpstreamAuthEnv     = "CCX_OPENAICHAT_UPSTREAM_AUTH"
 	CCXUpstreamAPIKeyEnv   = "CCX_OPENAICHAT_UPSTREAM_APIKEY"
 	CCXEnableThinkingEnv   = "CCX_OPENAICHAT_ENABLE_THINKING" // "true" / "false" — unset이면 필드 미전송
+	CCXUpstreamCAFileEnv   = "CCX_OPENAICHAT_UPSTREAM_CA_FILE"
+	CCXUpstreamInsecureEnv = "CCX_OPENAICHAT_UPSTREAM_INSECURE" // "true"면 업스트림 인증서 검증을 끈다
 )
 
 // SpawnInput은 부모가 SpawnDaemon에 전달하는 정보.
@@ -35,6 +37,10 @@ type SpawnInput struct {
 	// EnableThinking은 nil이면 enable_thinking 필드를 보내지 않고, 값이 있으면 그대로 전달.
 	// lightning-mlx 등 reasoning 모델은 false 권장 — Claude Code는 reasoning_content를 활용 못 함.
 	EnableThinking *bool
+
+	// UpstreamCAFile/UpstreamInsec는 profile.caCertFile / insecureTLS (자가서명 HTTPS 업스트림용).
+	UpstreamCAFile string
+	UpstreamInsec  bool
 }
 
 type SpawnedDaemon struct {
@@ -66,6 +72,8 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		CCXUpstreamURLEnv+"="+in.UpstreamBaseURL,
 		CCXUpstreamAuthEnv+"="+in.UpstreamAuth,
 		CCXUpstreamAPIKeyEnv+"="+in.UpstreamAPIKey,
+		CCXUpstreamCAFileEnv+"="+in.UpstreamCAFile,
+		CCXUpstreamInsecureEnv+"="+strconv.FormatBool(in.UpstreamInsec),
 	)
 	if in.EnableThinking != nil {
 		val := "false"

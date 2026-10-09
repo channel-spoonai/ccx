@@ -28,7 +28,7 @@ const AuthAnthropic = "anthropic"
 // prepareAnthropic은 패스스루 프록시를 띄우고 BaseURL/AuthToken을 주입한 profile copy를 준다.
 // 정규화는 기본 ON. profile.env에 CCX_ANTHROPIC_NORMALIZE_SYSTEM=false 로 끌 수 있다.
 // effort 매핑도 기본 ON — profile.env의 CCX_ANTHROPIC_EFFORT_MAP으로 표를 바꾸거나 끈다.
-func prepareAnthropic(p *config.Profile, fixUsage bool) (*config.Profile, error) {
+func prepareAnthropic(p *config.Profile, fixUsage bool, tlsOpt upstreamTLS) (*config.Profile, error) {
 	upstream := ResolveSecret(p.BaseURL)
 	if upstream == "" {
 		return nil, errors.New("profile.baseUrl is empty — set it to the upstream Anthropic-compatible server (e.g. http://localhost:8000)")
@@ -50,6 +50,8 @@ func prepareAnthropic(p *config.Profile, fixUsage bool) (*config.Profile, error)
 		SessionHeader:   strings.TrimSpace(p.SessionHeader),
 		EffortMap:       anthropicEffortMapValue(p),
 		FixUsage:        fixUsage,
+		UpstreamCAFile:  tlsOpt.CAFile,
+		UpstreamInsec:   tlsOpt.Insecure,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to spawn anthropic proxy: %w", err)
@@ -89,7 +91,7 @@ type fixUsageDecision struct {
 // 넣게 두었더니 LAN의 다른 기기 프로파일에서 빠져 /context가 다시 2배로 나왔다(2026-10 실측).
 // 그 밖의 서버는 응답만으로 캐시 포함 여부를 판별할 수 없어(규격대로인 서버에 켜면 신규 입력이
 // 0 근처로 과소 집계된다) 끈 채로 둔다. 감지 실패(서버 꺼짐·타임아웃)도 끈 쪽으로 떨어진다.
-func anthropicFixUsage(p *config.Profile) fixUsageDecision {
+func anthropicFixUsage(p *config.Profile, tlsOpt upstreamTLS) fixUsageDecision {
 	if v, ok := p.Env[proxy.CCXUsageIncludesCacheEnv]; ok {
 		switch strings.ToLower(strings.TrimSpace(ResolveSecret(v))) {
 		case "true", "1", "on", "yes":
@@ -97,7 +99,7 @@ func anthropicFixUsage(p *config.Profile) fixUsageDecision {
 		}
 		return fixUsageDecision{}
 	}
-	if upstreamOwnedBy(ResolveSecret(p.BaseURL), ResolveSecret(p.AuthToken), ResolveSecret(p.APIKey)) == mlxServeOwner {
+	if upstreamOwnedBy(tlsOpt.client(2*time.Second), ResolveSecret(p.BaseURL), ResolveSecret(p.AuthToken), ResolveSecret(p.APIKey)) == mlxServeOwner {
 		return fixUsageDecision{true, "mlx-serve 자동 감지"}
 	}
 	return fixUsageDecision{}
@@ -107,8 +109,9 @@ func anthropicFixUsage(p *config.Profile) fixUsageDecision {
 const mlxServeOwner = "mlx-serve"
 
 // upstreamOwnedBy는 업스트림 /v1/models 첫 모델의 owned_by를 돌려준다 (실패 시 "").
-// 런치를 붙잡지 않도록 짧게 끊는다 — 로컬·LAN 서버라 정상이면 수 ms다.
-func upstreamOwnedBy(baseURL, authToken, apiKey string) string {
+// 런치를 붙잡지 않도록 client에 짧은 timeout을 둔다 — 로컬·LAN 서버라 정상이면 수 ms다.
+// client는 프로파일 TLS 설정을 따른다 — 자가서명 업스트림에서 프로브만 조용히 실패하지 않게.
+func upstreamOwnedBy(client *http.Client, baseURL, authToken, apiKey string) string {
 	base := strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1")
 	if base == "" {
 		return ""
@@ -123,7 +126,7 @@ func upstreamOwnedBy(baseURL, authToken, apiKey string) string {
 	if apiKey != "" {
 		req.Header.Set("x-api-key", apiKey)
 	}
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}

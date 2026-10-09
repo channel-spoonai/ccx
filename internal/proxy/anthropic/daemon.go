@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/channel-spoonai/ccx/internal/procutil"
+	"github.com/channel-spoonai/ccx/internal/tlsconf"
 )
 
 type DaemonOptions struct {
@@ -22,6 +23,8 @@ type DaemonOptions struct {
 	SessionHeader   string
 	EffortMap       map[string]string
 	FixUsage        bool
+	UpstreamCAFile  string
+	UpstreamInsec   bool
 	IdleTimeout     time.Duration
 	ReadyWriter     interface {
 		Write([]byte) (int, error)
@@ -31,6 +34,14 @@ type DaemonOptions struct {
 // RunDaemon은 자식 프로세스에서 호출되는 진입점.
 // 127.0.0.1:0 listen → "ready PORT\n" 출력 → 부모 종료까지 대기.
 func RunDaemon(opts DaemonOptions) error {
+	tr, err := tlsconf.Transport(opts.UpstreamCAFile, opts.UpstreamInsec)
+	if err != nil {
+		return err
+	}
+	if tr != nil {
+		upstreamClient.Transport = tr
+	}
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("proxy listen failed: %w", err)

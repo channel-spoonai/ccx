@@ -294,6 +294,8 @@ func runOpenAIChatProxyDaemon() {
 		UpstreamAuth:    upstreamAuth,
 		UpstreamAPIKey:  upstreamAPIKey,
 		EnableThinking:  enableThinking,
+		UpstreamCAFile:  os.Getenv(openaiproxy.CCXUpstreamCAFileEnv),
+		UpstreamInsec:   os.Getenv(openaiproxy.CCXUpstreamInsecureEnv) == "true",
 		IdleTimeout:     0,
 		ReadyWriter:     os.Stdout,
 	})
@@ -325,6 +327,8 @@ func runAnthropicProxyDaemon() {
 		SessionHeader:   os.Getenv(anthropicproxy.CCXSessionHeaderEnv),
 		EffortMap:       effortMap,
 		FixUsage:        os.Getenv(anthropicproxy.CCXUsageIncludesCacheEnv) == "true",
+		UpstreamCAFile:  os.Getenv(anthropicproxy.CCXUpstreamCAFileEnv),
+		UpstreamInsec:   os.Getenv(anthropicproxy.CCXUpstreamInsecureEnv) == "true",
 		IdleTimeout:     0,
 		ReadyWriter:     os.Stdout,
 	})

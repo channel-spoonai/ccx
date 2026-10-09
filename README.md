@@ -174,6 +174,7 @@ Note: since the auto-compact window is a single per-session value, ccx uses the 
 
 - **LM Studio quality varies by model.** Many local models don't fully support tool use or long contexts.
 - Config is stored at `~/.config/ccx/ccx.config.json` with `0600` permissions. Override the path with `CCX_CONFIG`.
+- **Self-signed HTTPS upstreams** (e.g. a vast.ai instance): on an `auth: "anthropic"` or `"openai-chat"` profile, set `"caCertFile": "~/certs/upstream.pem"` to trust that certificate only for this upstream — the server's own certificate works even when it doesn't send its CA (`openssl s_client -connect HOST:PORT </dev/null | openssl x509 > upstream.pem`). `"insecureTLS": true` skips verification entirely; prefer `caCertFile`.
 
 ## Build from source
 

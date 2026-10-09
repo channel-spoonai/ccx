@@ -186,6 +186,7 @@ Claude Code는 모르는 모델 ID의 컨텍스트 윈도우를 200K로 가정�
 
 - **LM Studio(로컬)는 모델에 따라 품질 편차가 큽니다.** 툴 사용이나 긴 컨텍스트를 제대로 지원하지 않는 모델이 많습니다.
 - 설정 파일(`~/.config/ccx/ccx.config.json`)은 홈 디렉터리에 저장되며 권한은 `0600`으로 잠깁니다. 다른 경로를 쓰려면 `CCX_CONFIG` 환경변수로 오버라이드할 수 있습니다.
+- **자가서명 HTTPS 업스트림**(vast.ai 인스턴스 등): `auth: "anthropic"` 또는 `"openai-chat"` 프로파일에 `"caCertFile": "~/certs/upstream.pem"`을 두면 그 업스트림에서만 해당 인증서를 신뢰합니다. 서버가 CA를 보내지 않아도 서버 인증서 자체를 넣으면 됩니다(`openssl s_client -connect HOST:PORT </dev/null | openssl x509 > upstream.pem`). `"insecureTLS": true`는 검증 자체를 끄므로 가능하면 `caCertFile`을 쓰세요.
 
 ## 소스에서 빌드
 

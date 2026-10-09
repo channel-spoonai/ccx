@@ -171,6 +171,11 @@ Claude Code 쪽 등급은 Anthropic 모델 기준으로 매겨진 것이라 같�
 히스토리가 자라는 실제 대화에서는 구제되지 않았다(17,861로 차이 없음) — 그래서 `ConversationKey`
 재료에 effort를 넣지 않는다. 전환은 그 턴에 비용을 내고 하는 것이지, 공짜로 만들 수 있는 게 아니다.
 
+**`output_config.effort`도 매핑값으로 바꾼다**(off 티어면 지우고, 비면 `output_config`째 뺀다). MTPLX는 이
+자리를 읽지 않아 원본을 둬도 됐지만, vast.ai shim은 Anthropic 규격대로 여기를 읽고 자기 티어(xhigh/medium/low)
+밖의 값을 `Unexpected reasoning effort high.`로 400 낸다(2026-10 실측) — reasoning_effort를 옮겨 실어도 원본
+"high"가 남아 있으면 막힌다.
+
 표는 `profile.env`의 `CCX_ANTHROPIC_EFFORT_MAP`으로 바꾼다(`"low=off,medium=low,high=medium,xhigh=xhigh,max=xhigh,ultracode=xhigh"`).
 값이 `off`/`false`/`0`/`none`이면 기능 자체를 끄고, 개별 티어에 `keep`을 주면 그 티어만 손대지 않는다.
 매핑 실패는 정규화와 마찬가지로 치명적이지 않다 — 원본을 그대로 보내면 서버 기본 깊이로 돈다.
@@ -208,6 +213,22 @@ mlx-serve는 이 엔드포인트가 없어 404를 내고, 그러면 Claude Code�
   다시 시도하지 않고 원래 404를 중계한다(`tokenizeUnsupported`) — 지금보다 나빠지는 경우가 없다.
 - env 키를 두지 않는 이유: 기본 ON이라 키가 필요 없고, 키가 없으니 자동 업데이트 직후의 "구버전 부모 +
   신버전 데몬" 조합에서도 바로 동작한다(반면 usage 보정은 부모가 판정해 넘기므로 v0.5.9 이전 부모가 띄운 첫 실행엔 빠진다).
+
+## 자가서명 TLS 업스트림 (`caCertFile` / `insecureTLS`, `internal/tlsconf`)
+
+vast.ai 인스턴스처럼 자가서명 HTTPS로 서빙하는 업스트림용. ccx는 Go 바이너리라 `NODE_TLS_REJECT_UNAUTHORIZED`·
+`NODE_EXTRA_CA_CERTS`가 프록시 데몬에 닿지 않고, Windows·macOS에서는 `SSL_CERT_FILE`도 안 읽는다.
+
+- `caCertFile`(절대경로 또는 `~/`, `env:` 참조 가능)은 그 파일의 인증서**만** 신뢰한다 — 시스템 루트와 합치지 않는다.
+  **CA 없이 leaf만 넣어도 된다**: Go 검증기는 루트 풀에 든 인증서를 체인 구성 없이 신뢰하고(`crypto/x509`
+  `opts.Roots.contains(c)`), 호스트명(IP SAN)·유효기간 검사는 남는다. vast.ai는 leaf 한 장만 보내 CA를 엔드포인트에서
+  얻을 수 없다. 같은 leaf를 Windows OS 저장소에 넣는 우회는 실패한다(CryptoAPI는 leaf→CA 체인을 요구).
+- `insecureTLS: true`는 검증을 끈다. 배너에 노란 경고. 둘을 함께 쓰면 에러.
+- 적용 범위는 프록시 경로(`auth: "anthropic"` / `"openai-chat"`)의 데몬 업스트림 클라이언트와 부모의 `/v1/models`
+  프로브(`anthropicFixUsage`) — 프로브가 기본 Transport를 쓰면 인증서 오류로 조용히 실패해 mlx-serve 보정이 꺼진다.
+  다른 경로(직결·codex·responses)에 두면 무시된다고 배너로 알린다 — 직결은 Claude Code가 직접 연결한다.
+- 부모(`resolveUpstreamTLS`)가 경로 해석과 PEM 파싱을 먼저 해 본다. 데몬에서 실패하면 "ready" 타임아웃으로만 보여서다.
+- 데몬 env: `CCX_{ANTHROPIC,OPENAICHAT}_UPSTREAM_CA_FILE` / `_UPSTREAM_INSECURE` (추가만 — 구버전 부모는 키가 없어 기존 동작).
 
 ## 로컬 프로파일 기본값 (`internal/launcher/local.go`)
 
@@ -359,6 +380,14 @@ Claude Code는 모델 ID 패턴 하드코딩으로 컨텍스트 윈도우를 추
 
 - 기본은 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`(배너 `1M context: off`).
 - 단 Claude Code는 이 키를 "200K 상한을 지키겠다"로 읽어, **모델 윈도우가 200K를 넘으면 매 시작마다** `CLAUDE_CODE_DISABLE_1M_CONTEXT is set, but the 200K limit isn't enforced ...` 경고를 띄운다. 그래서 MAX>200K면 대신 시작 모델을 `ANTHROPIC_MODEL`로 고정한다(settings.json의 `model`, 없으면 `opus` — 배너 `Startup model:`). 사용자가 `--model`/`ANTHROPIC_MODEL`/`profile.model`로 `[1m]` 없는 모델을 이미 골랐다면 아무것도 하지 않고, `[1m]`이 든 모델을 골랐다면 경고를 감수하고 1M을 끈다. 세션 중 `/model`로 1M 옵션을 고르는 것까지는 막지 못한다.
+
+**settings의 정식 Claude ID 가드**(`ctxwin.GuardSettingsModel`, Guard1M **직전** 호출): Claude Code는
+settings.json `model`의 별칭(opus/sonnet/haiku)만 `ANTHROPIC_DEFAULT_*_MODEL`로 해석하고 `claude-opus-4-8` 같은
+정식 ID는 그대로 업스트림에 보내, 커스텀 모델 프로파일에서 "model may not exist"로 막힌다(vast.ai 실측). 그 값이
+`claude-`로 시작하고 프로파일 티어가 그 ID를 서빙하지 않으면 같은 계열 별칭(sonnet/haiku, 그 외 opus)을
+`ANTHROPIC_MODEL`로 고정한다(배너 `Startup model: claude-opus-4-8 → opus`). `--model`/`ANTHROPIC_MODEL`/
+`profile.model`로 이미 골랐으면 건드리지 않는다. Guard1M보다 먼저 돌아야 Guard1M이 고정값을 "사용자가 고른
+시작 모델"로 읽는다 — 순서가 바뀌면 200K 초과 윈도우에서 settings 원본을 다시 고정해 되돌린다.
 
 한 티어라도 `[1m]`이면 가드를 걸지 않는다(그 티어는 정말 1M). 사용자가 profile.env/ambient에 `CLAUDE_CODE_DISABLE_1M_CONTEXT`를 두면 그 값이 우선. `CCX_CONTEXT_AUTO=0`이면 컨텍스트 설정을 전부 생략하되 ccx 전용 suffix의 업스트림 유출만은 strip으로 막는다(`[1m]`은 보존). 카탈로그 prefix 매칭은 토큰 경계 검사 포함(`kimi-k30`이 `kimi-k3`에 매칭되지 않음).
 

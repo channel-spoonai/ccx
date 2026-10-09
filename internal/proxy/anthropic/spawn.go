@@ -39,6 +39,11 @@ const (
 	// CCXUsageIncludesCacheEnv가 "true"면 응답 usage.input_tokens에서 캐시분을 뺀다.
 	// input_tokens에 캐시를 포함해 보내는 업스트림(mlx-serve)용 opt-in.
 	CCXUsageIncludesCacheEnv = "CCX_ANTHROPIC_USAGE_INPUT_INCLUDES_CACHE"
+
+	// CCXUpstreamCAFileEnv는 업스트림 TLS에서 신뢰할 PEM 경로, CCXUpstreamInsecureEnv가
+	// "true"면 검증을 끈다 (profile.caCertFile / insecureTLS).
+	CCXUpstreamCAFileEnv   = "CCX_ANTHROPIC_UPSTREAM_CA_FILE"
+	CCXUpstreamInsecureEnv = "CCX_ANTHROPIC_UPSTREAM_INSECURE"
 )
 
 type SpawnInput struct {
@@ -49,6 +54,8 @@ type SpawnInput struct {
 	SessionHeader   string
 	EffortMap       string
 	FixUsage        bool
+	UpstreamCAFile  string
+	UpstreamInsec   bool
 }
 
 type SpawnedDaemon struct {
@@ -83,6 +90,8 @@ func SpawnDaemon(in SpawnInput, readyTimeout time.Duration) (*SpawnedDaemon, err
 		CCXSessionHeaderEnv+"="+in.SessionHeader,
 		CCXEffortMapEnv+"="+in.EffortMap,
 		CCXUsageIncludesCacheEnv+"="+strconv.FormatBool(in.FixUsage),
+		CCXUpstreamCAFileEnv+"="+in.UpstreamCAFile,
+		CCXUpstreamInsecureEnv+"="+strconv.FormatBool(in.UpstreamInsec),
 	)
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
